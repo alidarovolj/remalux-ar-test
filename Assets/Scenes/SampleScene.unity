@@ -2268,6 +2268,8 @@ MonoBehaviour:
   planeManager: {fileID: 151853166}
   wallMaterial: {fileID: 2100000, guid: 3b1c1828b390443b490050bce28b7a0c, type: 2}
   highlightMaterial: {fileID: 2100000, guid: 93e5dd6571b0e478daf1d3c8891c5bd3, type: 2}
+  previewAlpha: 0.5
+  colorTransitionSpeed: 5
 --- !u!114 &608830366
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2282,9 +2284,23 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   planeManager: {fileID: 151853166}
   wallMaterial: {fileID: 2100000, guid: 3b1c1828b390443b490050bce28b7a0c, type: 2}
-  minWallHeight: 2
-  minWallWidth: 1
+  minPlaneArea: 0.25
   maxWallGap: 0.2
+  planeMergeAngleThreshold: 8
+  updateInterval: 0.5
+  edgeDistanceThreshold: 0.2
+--- !u!114 &608830368 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 2512387470528047739, guid: 48cb3fb68c91eb94999fd99957eb0cae,
+    type: 3}
+  m_PrefabInstance: {fileID: 331264285}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 608830356}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e0cb9aa70a22847b5925ee5f067c10a9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &636896431
 GameObject:
   m_ObjectHideFlags: 0
@@ -6590,6 +6606,12 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1374157835}
   m_CullTransparentMesh: 1
+--- !u!20 &1389860833 stripped
+Camera:
+  m_CorrespondingSourceObject: {fileID: 2512387469002778331, guid: 48cb3fb68c91eb94999fd99957eb0cae,
+    type: 3}
+  m_PrefabInstance: {fileID: 331264285}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1394352680
 GameObject:
   m_ObjectHideFlags: 0
@@ -8679,6 +8701,55 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1980895745}
   m_CullTransparentMesh: 1
+--- !u!1 &1982556613
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1982556615}
+  - component: {fileID: 1982556614}
+  m_Layer: 0
+  m_Name: AR Player Controller
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1982556614
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1982556613}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dd9999b09190be840a1585b0ab62b3f5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  moveSpeed: 2
+  rotationSpeed: 100
+  pinchSpeed: 0.5
+  xrOrigin: {fileID: 608830368}
+  mainCamera: {fileID: 1389860833}
+--- !u!4 &1982556615
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1982556613}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -1.2809734, y: 2.2576652, z: -0.19363308}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1997436470
 GameObject:
   m_ObjectHideFlags: 0
@@ -10122,3 +10193,4 @@ SceneRoots:
   - {fileID: 331264285}
   - {fileID: 1214246501}
   - {fileID: 7155482354822069843}
+  - {fileID: 1982556615}
