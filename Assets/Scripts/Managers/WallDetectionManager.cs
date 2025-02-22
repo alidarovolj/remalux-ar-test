@@ -3,546 +3,544 @@ using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 using System.Collections.Generic;
 using System.Linq;
+using System.Collections;
 
-public class WallDetectionManager : MonoBehaviour
+namespace Remalux.AR
 {
-    [Header("Настройки обнаружения")]
-    [SerializeField] private float minPlaneArea = 0.01f;  // Сильно уменьшаем минимальную площадь
-    [SerializeField] private float maxWallGap = 1.0f;     // Увеличиваем допустимый промежуток для лучшего объединения
-    [SerializeField] private float planeMergeAngleThreshold = 35f; // Увеличиваем угол слияния
-    [SerializeField] private float updateInterval = 0.05f;  // Чаще обновляем
-    [SerializeField] private float edgeDistanceThreshold = 1.0f; // Увеличиваем порог расстояния краёв
-    
-    [Header("Настройки углов")]
-    [SerializeField] private float cornerAngleThreshold = 85f; // Угол для определения углов (близко к 90)
-    [SerializeField] private float cornerDistanceThreshold = 1.5f; // Увеличенное расстояние для углов
-    [SerializeField] private float cornerHeightTolerance = 0.3f; // Допуск по высоте для углов
-    [SerializeField] private bool prioritizeCorners = true; // Приоритет обработки углов
-
-    [Header("Дополнительные настройки")]
-    [SerializeField] private float confidenceThreshold = 0.5f; // Порог уверенности в плоскости
-    [SerializeField] private float accumulationTime = 0.5f; // Время накопления данных
-    [SerializeField] private int minPointsForPlane = 4; // Минимальное количество точек для плоскости
-
-    [Header("Компоненты")]
-    [SerializeField] private ARPlaneManager planeManager;
-    [SerializeField] private Material wallMaterial;
-
-    private Dictionary<TrackableId, WallInfo> detectedWalls = new Dictionary<TrackableId, WallInfo>();
-    private float lastUpdateTime;
-    private const float MIN_WALL_HEIGHT = 0.2f; // Уменьшаем минимальную высоту
-    private const float MIN_WALL_WIDTH = 0.05f;  // Уменьшаем минимальную ширину
-
-    private void Start()
+    public class WallDetectionManager : MonoBehaviour
     {
-        if (planeManager != null)
+        public delegate void WallDetectedHandler(ARPlane plane, GameObject wall);
+        public event WallDetectedHandler OnWallDetected;
+
+        private const float MIN_WALL_HEIGHT = 1.5f; // Уменьшаем высоту стены для тестирования
+
+        [Header("Настройки обнаружения")]
+        [SerializeField] private float maxWallGap = 0.5f;    // Увеличиваем расстояние для объединения
+        [SerializeField] private float planeMergeAngleThreshold = 10f; // Увеличиваем допуск для углов слияния
+        [SerializeField] private float updateInterval = 0.2f; // Увеличиваем интервал обновления
+        [SerializeField] private float edgeDistanceThreshold = 0.5f; // Увеличиваем порог для краёв
+        [SerializeField] private float minWallArea = 0.3f; // Уменьшаем минимальную площадь для стены
+        [SerializeField] private float verticalAlignmentThreshold = 15f; // Увеличиваем допуск отклонения от вертикали
+        
+        [Header("Настройки расширения")]
+        [SerializeField] private float expansionRate = 1.05f; // Уменьшаем коэффициент расширения
+        
+        [Header("Настройки углов")]
+        [SerializeField] private float cornerAngleThreshold = 95f; // Увеличиваем допуск для углов
+        [SerializeField] private float cornerDistanceThreshold = 3.0f; // Значительно увеличиваем расстояние для углов
+        [SerializeField] private float cornerHeightTolerance = 0.5f; // Увеличиваем допуск по высоте для углов
+        [SerializeField] private bool prioritizeCorners = true; // Приоритет обработки углов
+
+        [Header("Компоненты")]
+        [SerializeField] private ARPlaneManager planeManager;
+        [SerializeField] private Material wallMaterial;
+
+        private Dictionary<TrackableId, GameObject> detectedWalls = new Dictionary<TrackableId, GameObject>();
+        private Dictionary<TrackableId, Vector3> wallLastPositions = new Dictionary<TrackableId, Vector3>();
+        private float lastUpdateTime;
+        private const float MIN_WALL_WIDTH = 0.05f;
+        private const float UPDATE_THRESHOLD = 0.01f; // Минимальное изменение для обновления
+        private const float POSITION_SMOOTHING = 0.3f; // Увеличиваем время сглаживания
+        private const float SIZE_SMOOTHING = 0.2f; // Увеличиваем время сглаживания
+        private const float MAX_POSITION_CHANGE = 0.05f; // Уменьшаем максимальное изменение за кадр
+        private const float MAX_SIZE_CHANGE = 0.025f; // Уменьшаем максимальное изменение за кадр
+        private const float STABILITY_THRESHOLD = 0.01f; // Порог стабильности
+        private const float STABILITY_TIME = 0.5f; // Время для признания стены стабильной
+
+        // Добавляем константы для размеров стен
+        public const float WALL_HEIGHT = 1.8f;          // Уменьшаем стандартную высоту стены с 2.4м до 1.8м
+        public const float WALL_EXTENSION = 1.01f;      // Минимальное расширение (1%)
+        public const float WALL_BOTTOM_OFFSET = -0.05f; // Небольшой отступ вниз
+
+        private float lastDebugTime = 0f;
+        private const float DEBUG_LOG_INTERVAL = 0.5f; // Интервал для дебаг сообщений
+
+        private void Start()
         {
+            if (planeManager == null)
+            {
+                Debug.LogError("WallDetectionManager: AR Plane Manager не назначен!");
+                return;
+            }
+
+            Debug.Log($"Plane Detection Mode: {planeManager.requestedDetectionMode}");
+            Debug.Log($"Plane Manager enabled: {planeManager.enabled}");
+            Debug.Log($"Plane Manager subsystem running: {planeManager.subsystem?.running}");
+            
+            if (wallMaterial == null)
+            {
+                Debug.LogError("WallDetectionManager: Wall Material не назначен!");
+                return;
+            }
+
+            // Полностью отключаем визуализацию AR-плоскостей
+            if (planeManager.planePrefab != null)
+            {
+                planeManager.planePrefab.SetActive(false);
+            }
+            
+            // Отключаем отображение всех плоскостей
+            planeManager.enabled = true;
+            planeManager.requestedDetectionMode = PlaneDetectionMode.Vertical;
+            planeManager.planePrefab = null;
+
+            // Деактивируем существующие плоскости
+            foreach (var plane in planeManager.trackables)
+            {
+                plane.gameObject.SetActive(false);
+            }
+
             ConfigurePlaneDetection();
         }
-        else
+
+        private void ConfigurePlaneDetection()
         {
-            Debug.LogError("WallDetectionManager: AR Plane Manager не назначен!");
-        }
-
-        if (wallMaterial == null)
-        {
-            Debug.LogError("WallDetectionManager: Wall Material не назначен!");
-        }
-    }
-
-    private void ConfigurePlaneDetection()
-    {
-        if (planeManager == null) return;
-
-        // Базовая настройка
-        planeManager.requestedDetectionMode = PlaneDetectionMode.Vertical;
-        
-        // Настройка через subsystem если доступен
-        if (planeManager.subsystem != null)
-        {
-            planeManager.subsystem.requestedPlaneDetectionMode = PlaneDetectionMode.Vertical;
-            Debug.Log("Настройка параметров AR плоскостей выполнена успешно");
-        }
-
-        EnablePlaneDetection();
-    }
-
-    private void OnEnable()
-    {
-        EnablePlaneDetection();
-    }
-
-    private void OnDisable()
-    {
-        DisablePlaneDetection();
-        detectedWalls.Clear();
-    }
-
-    private void EnablePlaneDetection()
-    {
-        if (planeManager != null)
-        {
-            planeManager.enabled = true;
-            planeManager.planesChanged += OnPlanesChanged;
-        }
-    }
-
-    private void DisablePlaneDetection()
-    {
-        if (planeManager != null)
-        {
-            planeManager.planesChanged -= OnPlanesChanged;
-            planeManager.enabled = false;
-        }
-    }
-
-    private void OnPlanesChanged(ARPlanesChangedEventArgs eventArgs)
-    {
-        // Обработка добавленных плоскостей
-        foreach (ARPlane plane in eventArgs.added)
-        {
-            if (plane != null)
+            // Установим более агрессивные настройки обнаружения
+            planeManager.requestedDetectionMode = PlaneDetectionMode.Vertical;
+            
+            if (planeManager.subsystem != null)
             {
-                plane.boundaryChanged += OnPlaneBoundaryChanged;
+                // Явно включаем обнаружение вертикальных поверхностей
+                planeManager.subsystem.requestedPlaneDetectionMode = PlaneDetectionMode.Vertical;
+                
+                // Уменьшим минимальный размер обнаруживаемой плоскости
+                var subsystemDescriptor = planeManager.subsystem.subsystemDescriptor;
+                if (subsystemDescriptor != null)
+                {
+                    // Логируем возможности системы
+                    Debug.Log($"Plane Subsystem: {subsystemDescriptor.id}, Supports: Vertical={subsystemDescriptor.supportsVerticalPlaneDetection}, Horizontal={subsystemDescriptor.supportsHorizontalPlaneDetection}");
+                }
+                
+                Debug.Log("Настройка параметров AR плоскостей выполнена успешно");
             }
         }
 
-        // Обработка удаленных плоскостей
-        foreach (ARPlane plane in eventArgs.removed)
+        private void OnEnable()
         {
-            if (plane != null)
+            if (planeManager != null)
             {
-                plane.boundaryChanged -= OnPlaneBoundaryChanged;
-                if (detectedWalls.ContainsKey(plane.trackableId))
+                planeManager.trackablesChanged.AddListener(OnTrackablesChanged);
+                Debug.Log("WallDetectionManager: Подписка на события изменения плоскостей");
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (planeManager != null)
+            {
+                planeManager.trackablesChanged.RemoveListener(OnTrackablesChanged);
+            }
+            foreach (var wall in detectedWalls.Values)
+            {
+                if (wall != null)
                 {
-                    detectedWalls.Remove(plane.trackableId);
+                    Destroy(wall);
                 }
             }
+            detectedWalls.Clear();
         }
 
-        // Обработка обновленных плоскостей
-        foreach (ARPlane plane in eventArgs.updated)
+        private void OnTrackablesChanged(ARTrackablesChangedEventArgs<ARPlane> eventArgs)
         {
-            if (plane != null && plane.gameObject != null)
+            // Добавим более подробное логирование
+            if (eventArgs.added != null && eventArgs.added.Count > 0)
             {
-                ProcessPlane(plane);
-            }
-        }
-    }
-
-    private void OnPlaneBoundaryChanged(ARPlaneBoundaryChangedEventArgs args)
-    {
-        if (Time.time - lastUpdateTime < updateInterval) return;
-        lastUpdateTime = Time.time;
-
-        var plane = args.plane;
-        ProcessPlane(plane);
-        MergeWalls();
-    }
-
-    private void Update()
-    {
-        if (Time.time - lastUpdateTime < updateInterval) return;
-        lastUpdateTime = Time.time;
-
-        if (planeManager != null)
-        {
-            UpdateWalls();
-            MergeWalls();
-        }
-    }
-
-    private void UpdateWalls()
-    {
-        var invalidWalls = new List<TrackableId>();
-
-        foreach (var wallPair in detectedWalls)
-        {
-            if (!planeManager.trackables.TryGetTrackable(wallPair.Key, out ARPlane _))
-            {
-                invalidWalls.Add(wallPair.Key);
-            }
-        }
-
-        foreach (var id in invalidWalls)
-        {
-            detectedWalls.Remove(id);
-        }
-
-        foreach (var plane in planeManager.trackables)
-        {
-            if (plane != null && plane.gameObject != null)
-            {
-                ProcessPlane(plane);
-            }
-        }
-    }
-
-    private void ProcessPlane(ARPlane plane)
-    {
-        if (!plane.gameObject.activeInHierarchy)
-            return;
-
-        // Проверяем уверенность в плоскости
-        if (plane.alignment != PlaneAlignment.Vertical || plane.trackingState != TrackingState.Tracking)
-        {
-            return;
-        }
-
-        Vector2 size = plane.size;
-        float area = size.x * size.y;
-
-        // Более мягкие требования к размерам
-        if (area < minPlaneArea || size.y < MIN_WALL_HEIGHT || size.x < MIN_WALL_WIDTH)
-        {
-            return;
-        }
-
-        // Проверяем количество точек
-        var mesh = plane.GetComponent<MeshFilter>()?.mesh;
-        if (mesh != null && mesh.vertices.Length < minPointsForPlane)
-        {
-            return;
-        }
-
-        // Более мягкая проверка вертикальности
-        float verticalAngle = Vector3.Angle(plane.normal, Vector3.up);
-        if (Mathf.Abs(verticalAngle - 90f) > 35f) // Увеличиваем допуск к вертикальности
-        {
-            return;
-        }
-
-        if (!detectedWalls.ContainsKey(plane.trackableId))
-        {
-            detectedWalls[plane.trackableId] = new WallInfo(plane, planeManager);
-
-            var meshRenderer = plane.GetComponent<MeshRenderer>();
-            if (meshRenderer != null && wallMaterial != null)
-            {
-                meshRenderer.material = new Material(wallMaterial);
-                Color wallColor = meshRenderer.material.color;
-                wallColor.a = 1f;
-                meshRenderer.material.color = wallColor;
-                meshRenderer.material.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
-            }
-        }
-
-        detectedWalls[plane.trackableId].UpdateBoundaries();
-    }
-
-    private void MergeWalls()
-    {
-        bool mergedAny;
-        do
-        {
-            mergedAny = false;
-            var wallsToMerge = new List<(TrackableId, TrackableId)>();
-            var processedWalls = new HashSet<TrackableId>();
-
-            // Сначала обрабатываем углы, если включен приоритет углов
-            if (prioritizeCorners)
-            {
-                foreach (var wall1 in detectedWalls)
+                Debug.Log($"Добавлено новых плоскостей: {eventArgs.added.Count}");
+                foreach (var plane in eventArgs.added)
                 {
-                    if (!wall1.Value.isActive || processedWalls.Contains(wall1.Key)) continue;
+                    Debug.Log($"Новая плоскость: ID={plane.trackableId}, " +
+                             $"Alignment={plane.alignment}, " +
+                             $"Position={plane.transform.position}");
+                }
+            }
 
-                    foreach (var wall2 in detectedWalls)
+            // Обработка добавленных плоскостей
+            if (eventArgs.added != null)
+            {
+                foreach (var plane in eventArgs.added)
+                {
+                    if (plane.alignment == PlaneAlignment.Vertical)
                     {
-                        if (!wall2.Value.isActive || wall1.Key == wall2.Key || 
-                            processedWalls.Contains(wall2.Key)) continue;
-
-                        if (planeManager.trackables.TryGetTrackable(wall1.Key, out ARPlane plane1) &&
-                            planeManager.trackables.TryGetTrackable(wall2.Key, out ARPlane plane2))
-                        {
-                            if (IsCorner(plane1, plane2) && ShouldMergePlanes(plane1, plane2))
-                            {
-                                wallsToMerge.Add((wall1.Key, wall2.Key));
-                                processedWalls.Add(wall1.Key);
-                                processedWalls.Add(wall2.Key);
-                                mergedAny = true;
-                                break;
-                            }
-                        }
+                        ProcessPlane(plane);
                     }
                 }
             }
 
-            // Затем обрабатываем остальные стены
-            foreach (var wall1 in detectedWalls)
+            // Обработка обновленных плоскостей
+            if (eventArgs.updated != null)
             {
-                if (!wall1.Value.isActive || processedWalls.Contains(wall1.Key)) continue;
-
-                foreach (var wall2 in detectedWalls)
+                foreach (var plane in eventArgs.updated)
                 {
-                    if (!wall2.Value.isActive || wall1.Key == wall2.Key || 
-                        processedWalls.Contains(wall2.Key)) continue;
-
-                    if (planeManager.trackables.TryGetTrackable(wall1.Key, out ARPlane plane1) &&
-                        planeManager.trackables.TryGetTrackable(wall2.Key, out ARPlane plane2))
+                    if (plane.alignment == PlaneAlignment.Vertical)
                     {
-                        if (ShouldMergePlanes(plane1, plane2))
+                        UpdatePlane(plane);
+                    }
+                }
+            }
+
+            // Обработка удаленных плоскостей
+            if (eventArgs.removed != null)
+            {
+                foreach (var pair in eventArgs.removed)
+                {
+                    var trackableId = pair.Key;
+                    if (detectedWalls.TryGetValue(trackableId, out var wall))
+                    {
+                        Destroy(wall);
+                        detectedWalls.Remove(trackableId);
+                    }
+                }
+            }
+        }
+
+        private void ProcessPlane(ARPlane plane)
+        {
+            if (plane.alignment == PlaneAlignment.Vertical)
+            {
+                // Отключаем визуализацию для новой плоскости
+                var meshRenderer = plane.gameObject.GetComponent<MeshRenderer>();
+                if (meshRenderer != null)
+                {
+                    meshRenderer.enabled = false;
+                }
+
+                var lineRenderer = plane.gameObject.GetComponent<LineRenderer>();
+                if (lineRenderer != null)
+                {
+                    lineRenderer.enabled = false;
+                }
+
+                // Отключаем ARPlaneMeshVisualizer
+                var visualizer = plane.gameObject.GetComponent<ARPlaneMeshVisualizer>();
+                if (visualizer != null)
+                {
+                    visualizer.enabled = false;
+                }
+
+                // Фильтруем частоту дебаг сообщений
+                bool shouldLog = Time.time - lastDebugTime >= DEBUG_LOG_INTERVAL;
+                if (shouldLog)
+                {
+                    lastDebugTime = Time.time;
+                    Debug.Log($"Plane Detection Mode: {planeManager.requestedDetectionMode}");
+                    Debug.Log($"Plane Manager enabled: {planeManager.enabled}");
+                }
+
+                // Проверяем, действительно ли плоскость вертикальная
+                float angleFromVertical = Vector3.Angle(plane.normal, Vector3.up);
+                bool isNearlyVertical = Mathf.Abs(angleFromVertical - 90f) < verticalAlignmentThreshold;
+                
+                // Проверяем размер плоскости и соотношение сторон
+                float aspectRatio = plane.size.y / plane.size.x;
+                bool isLargeEnough = plane.size.x * plane.size.y > minWallArea;
+                bool hasValidAspectRatio = aspectRatio < 1.2f; // Увеличиваем допустимое соотношение сторон
+                
+                // Проверяем, не находится ли плоскость слишком высоко
+                bool isAtValidHeight = true;
+                float averageHeight = 0;
+                if (detectedWalls.Count > 0)
+                {
+                    foreach (var wall in detectedWalls.Values)
+                    {
+                        if (wall != null && wall.activeInHierarchy)
                         {
-                            wallsToMerge.Add((wall1.Key, wall2.Key));
-                            processedWalls.Add(wall1.Key);
-                            processedWalls.Add(wall2.Key);
-                            mergedAny = true;
+                            averageHeight += wall.transform.position.y;
+                        }
+                    }
+                    averageHeight /= detectedWalls.Count;
+                    
+                    float heightDifference = Mathf.Abs(plane.center.y - averageHeight);
+                    isAtValidHeight = heightDifference < 0.5f; // Увеличиваем допуск по высоте до 50см
+                }
+
+                // Проверяем, нет ли уже стены рядом с этой позицией и с похожей ориентацией
+                bool isTooClose = false;
+                foreach (var kvp in detectedWalls)
+                {
+                    var existingPlane = planeManager.GetPlane(kvp.Key);
+                    if (existingPlane != null && kvp.Value.activeInHierarchy)
+                    {
+                        float distance = Vector3.Distance(kvp.Value.transform.position, plane.center);
+                        float angleToExisting = Vector3.Angle(existingPlane.normal, plane.normal);
+                        
+                        // Проверяем расстояние и угол между плоскостями
+                        if (distance < 0.3f && angleToExisting < 20f) // Уменьшаем минимальное расстояние
+                        {
+                            isTooClose = true;
                             break;
                         }
                     }
                 }
-                if (mergedAny) break;
-            }
 
-            foreach (var (wall1Id, wall2Id) in wallsToMerge)
-            {
-                MergeWallPair(wall1Id, wall2Id);
-            }
-        } while (mergedAny);
-    }
-
-    private bool ShouldMergePlanes(ARPlane plane1, ARPlane plane2)
-    {
-        if (plane1.trackingState != TrackingState.Tracking || 
-            plane2.trackingState != TrackingState.Tracking)
-        {
-            return false;
-        }
-
-        // Проверяем, образуют ли плоскости угол
-        bool isCorner = IsCorner(plane1, plane2);
-        float maxDistance = isCorner ? cornerDistanceThreshold : maxWallGap;
-        
-        float distance = Vector3.Distance(plane1.center, plane2.center);
-        if (distance > maxDistance) return false;
-
-        // Для углов используем другую логику
-        if (isCorner)
-        {
-            return ValidateCorner(plane1, plane2);
-        }
-
-        // Стандартная логика для параллельных стен
-        float angle = Vector3.Angle(plane1.normal, plane2.normal);
-        if (angle > planeMergeAngleThreshold) return false;
-
-        Bounds bounds1 = plane1.GetComponent<MeshRenderer>().bounds;
-        Bounds bounds2 = plane2.GetComponent<MeshRenderer>().bounds;
-        
-        float heightOverlap = Mathf.Min(bounds1.max.y, bounds2.max.y) - Mathf.Max(bounds1.min.y, bounds2.min.y);
-        if (heightOverlap < 0.01f) return false;
-
-        if (!bounds1.Intersects(bounds2))
-        {
-            return HasSharedEdge(plane1, plane2);
-        }
-
-        return true;
-    }
-
-    private bool IsCorner(ARPlane plane1, ARPlane plane2)
-    {
-        // Получаем нормали плоскостей в мировых координатах
-        Vector3 normal1 = plane1.transform.TransformDirection(plane1.normal).normalized;
-        Vector3 normal2 = plane2.transform.TransformDirection(plane2.normal).normalized;
-
-        // Проверяем угол между нормалями
-        float angle = Vector3.Angle(normal1, normal2);
-        return Mathf.Abs(angle - 90f) < cornerAngleThreshold;
-    }
-
-    private bool ValidateCorner(ARPlane plane1, ARPlane plane2)
-    {
-        Bounds bounds1 = plane1.GetComponent<MeshRenderer>().bounds;
-        Bounds bounds2 = plane2.GetComponent<MeshRenderer>().bounds;
-
-        // Проверяем перекрытие по высоте с большим допуском
-        float heightDiff = Mathf.Abs(bounds1.center.y - bounds2.center.y);
-        if (heightDiff > cornerHeightTolerance) return false;
-
-        // Проверяем близость краёв
-        Vector3 closestPoint1 = GetClosestEdgePoint(plane1, plane2.center);
-        Vector3 closestPoint2 = GetClosestEdgePoint(plane2, plane1.center);
-        
-        float edgeDistance = Vector3.Distance(closestPoint1, closestPoint2);
-        return edgeDistance < cornerDistanceThreshold;
-    }
-
-    private Vector3 GetClosestEdgePoint(ARPlane plane, Vector3 targetPoint)
-    {
-        if (!detectedWalls.TryGetValue(plane.trackableId, out WallInfo wallInfo))
-            return plane.center;
-
-        Vector3 closestPoint = plane.center;
-        float minDistance = float.MaxValue;
-
-        // Проверяем все рёбра плоскости
-        for (int i = 0; i < wallInfo.boundaries.Length; i++)
-        {
-            Vector3 start = wallInfo.boundaries[i];
-            Vector3 end = wallInfo.boundaries[(i + 1) % wallInfo.boundaries.Length];
-
-            Vector3 point = GetClosestPointOnLine(start, end, targetPoint);
-            float distance = Vector3.Distance(point, targetPoint);
-
-            if (distance < minDistance)
-            {
-                minDistance = distance;
-                closestPoint = point;
-            }
-        }
-
-        return closestPoint;
-    }
-
-    private Vector3 GetClosestPointOnLine(Vector3 lineStart, Vector3 lineEnd, Vector3 point)
-    {
-        Vector3 line = lineEnd - lineStart;
-        float lineLength = line.magnitude;
-        line.Normalize();
-
-        Vector3 v = point - lineStart;
-        float d = Vector3.Dot(v, line);
-        d = Mathf.Clamp(d, 0f, lineLength);
-
-        return lineStart + line * d;
-    }
-
-    private bool HasSharedEdge(ARPlane plane1, ARPlane plane2)
-    {
-        var bounds1 = detectedWalls[plane1.trackableId].boundaries;
-        var bounds2 = detectedWalls[plane2.trackableId].boundaries;
-
-        // Проверяем каждую пару рёбер
-        for (int i = 0; i < bounds1.Length; i++)
-        {
-            Vector3 edge1Start = bounds1[i];
-            Vector3 edge1End = bounds1[(i + 1) % bounds1.Length];
-
-            for (int j = 0; j < bounds2.Length; j++)
-            {
-                Vector3 edge2Start = bounds2[j];
-                Vector3 edge2End = bounds2[(j + 1) % bounds2.Length];
-
-                // Проверяем близость рёбер и их направление
-                if (EdgesAreClose(edge1Start, edge1End, edge2Start, edge2End))
+                if (isNearlyVertical && isLargeEnough && hasValidAspectRatio && isAtValidHeight && !isTooClose)
                 {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private bool EdgesAreClose(Vector3 edge1Start, Vector3 edge1End, Vector3 edge2Start, Vector3 edge2End)
-    {
-        float distStart = Mathf.Min(
-            Vector3.Distance(edge1Start, edge2Start),
-            Vector3.Distance(edge1Start, edge2End)
-        );
-        float distEnd = Mathf.Min(
-            Vector3.Distance(edge1End, edge2Start),
-            Vector3.Distance(edge1End, edge2End)
-        );
-
-        Vector3 edge1Dir = (edge1End - edge1Start).normalized;
-        Vector3 edge2Dir = (edge2End - edge2Start).normalized;
-        float edgeAngle = Vector3.Angle(edge1Dir, edge2Dir);
-
-        // Сильно смягчаем условия для объединения
-        return (distStart < edgeDistanceThreshold || distEnd < edgeDistanceThreshold) &&
-               (edgeAngle < 35f || Mathf.Abs(edgeAngle - 180f) < 35f);
-    }
-
-    private void MergeWallPair(TrackableId wall1Id, TrackableId wall2Id)
-    {
-        if (!detectedWalls.ContainsKey(wall1Id) || !detectedWalls.ContainsKey(wall2Id))
-            return;
-
-        var wall1 = detectedWalls[wall1Id];
-        var wall2 = detectedWalls[wall2Id];
-
-        if (planeManager.trackables.TryGetTrackable(wall1Id, out ARPlane plane1) &&
-            planeManager.trackables.TryGetTrackable(wall2Id, out ARPlane plane2))
-        {
-            wall1.MergeWith(wall2);
-
-            var meshFilter1 = plane1.GetComponent<MeshFilter>();
-            var meshRenderer1 = plane1.GetComponent<MeshRenderer>();
-            var meshRenderer2 = plane2.GetComponent<MeshRenderer>();
-
-            if (meshFilter1 != null && meshFilter1.mesh != null)
-            {
-                if (meshRenderer1 != null && meshRenderer2 != null)
-                {
-                    float brightness1 = meshRenderer1.material.color.grayscale;
-                    float brightness2 = meshRenderer2.material.color.grayscale;
+                    Debug.Log($"WallDetectionManager: Обработка вертикальной плоскости {plane.trackableId}");
+                    Debug.Log($"Plane size: {plane.size}, Normal: {plane.normal}, Angle from vertical: {angleFromVertical}, Aspect ratio: {aspectRatio}");
                     
-                    if (brightness2 > brightness1)
+                    if (!detectedWalls.ContainsKey(plane.trackableId))
                     {
-                        meshRenderer1.material.color = meshRenderer2.material.color;
+                        Debug.Log($"WallDetectionManager: Создание новой стены для плоскости {plane.trackableId}");
+                        CreateWall(plane);
+                    }
+                    else
+                    {
+                        Debug.Log($"WallDetectionManager: Обновление существующей стены для плоскости {plane.trackableId}");
+                        UpdatePlane(plane);
                     }
                 }
-
-                wall2.isActive = false;
-                plane2.gameObject.SetActive(false);
-            }
-        }
-    }
-
-    public class WallInfo
-    {
-        public TrackableId trackableId;
-        public Vector3[] boundaries;
-        public HashSet<TrackableId> connectedWalls;
-        private ARPlaneManager planeManager;
-        public List<Vector3> mergedBoundaries;
-        public bool isActive = true;
-
-        public WallInfo(ARPlane plane, ARPlaneManager manager)
-        {
-            this.trackableId = plane.trackableId;
-            this.planeManager = manager;
-            this.connectedWalls = new HashSet<TrackableId>();
-            this.mergedBoundaries = new List<Vector3>();
-            UpdateBoundaries();
-        }
-
-        public void UpdateBoundaries()
-        {
-            if (!isActive) return;
-
-            if (planeManager != null && planeManager.trackables.TryGetTrackable(trackableId, out ARPlane plane))
-            {
-                var mesh = plane.GetComponent<MeshFilter>()?.mesh;
-                if (mesh != null)
+                else
                 {
-                    boundaries = new Vector3[mesh.vertices.Length];
-                    for (int i = 0; i < mesh.vertices.Length; i++)
+                    Debug.Log($"WallDetectionManager: Плоскость отклонена. Угол: {angleFromVertical}, " +
+                             $"Размер: {plane.size}, Соотношение сторон: {aspectRatio}, " +
+                             $"Валидная высота: {isAtValidHeight}, Слишком близко: {isTooClose}");
+                }
+            }
+            else
+            {
+                Debug.Log($"WallDetectionManager: Пропуск не-вертикальной плоскости {plane.trackableId}, alignment: {plane.alignment}");
+            }
+        }
+
+        private void UpdatePlane(ARPlane plane)
+        {
+            if (detectedWalls.TryGetValue(plane.trackableId, out var wall))
+            {
+                UpdateWall(wall, plane);
+            }
+            else if (plane.alignment == PlaneAlignment.Vertical)
+            {
+                CreateWall(plane);
+            }
+        }
+
+        private void RemovePlane(GameObject wall)
+        {
+            if (detectedWalls.TryGetValue(wall.GetComponent<ARPlane>().trackableId, out var existingWall))
+            {
+                Destroy(existingWall);
+                detectedWalls.Remove(wall.GetComponent<ARPlane>().trackableId);
+            }
+        }
+
+        private void CreateWall(ARPlane plane)
+        {
+            if (detectedWalls.ContainsKey(plane.trackableId))
+            {
+                Debug.LogWarning($"WallDetectionManager: Попытка создать стену с существующим ID: {plane.trackableId}");
+                return;
+            }
+
+            Debug.Log($"WallDetectionManager: Создание стены... Размер границы: {plane.boundary.Length}, Центр: {plane.center}, Нормаль: {plane.normal}");
+
+            var wall = new GameObject($"Wall_{plane.trackableId}");
+            
+            // Создаем компоненты
+            var meshFilter = wall.AddComponent<MeshFilter>();
+            var meshRenderer = wall.AddComponent<MeshRenderer>();
+            meshRenderer.material = wallMaterial; // Используем оригинальный материал вместо создания нового
+            meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            meshRenderer.receiveShadows = false;
+
+            // Обновляем меш и позицию
+            UpdateWallMesh(meshFilter, plane, plane.size.x * WALL_EXTENSION);
+            
+            detectedWalls.Add(plane.trackableId, wall);
+            
+            Debug.Log($"WallDetectionManager: Стена создана успешно. Всего стен: {detectedWalls.Count}");
+            
+            OnWallDetected?.Invoke(plane, wall);
+        }
+
+        private void UpdateWall(GameObject wall, ARPlane plane)
+        {
+            var meshFilter = wall.GetComponent<MeshFilter>();
+            if (meshFilter == null) return;
+
+            bool wasUpdated = false;
+
+            // Вычисляем новую позицию и размеры
+            Vector3 targetPosition;
+            float targetWidth;
+            CalculateWallDimensions(plane, out targetPosition, out targetWidth);
+
+            // Проверяем, нужно ли обновлять стену
+            if (!wallLastPositions.ContainsKey(plane.trackableId) ||
+                Vector3.Distance(wallLastPositions[plane.trackableId], targetPosition) > UPDATE_THRESHOLD)
+            {
+                // Обновляем позицию
+                wall.transform.position = targetPosition;
+                wallLastPositions[plane.trackableId] = targetPosition;
+
+                // Обновляем поворот
+                wall.transform.rotation = Quaternion.LookRotation(-plane.normal.normalized, Vector3.up);
+
+                wasUpdated = true;
+            }
+
+            // Обновляем меш только если размер изменился
+            float currentWidth = meshFilter.mesh.bounds.size.x;
+            if (Mathf.Abs(currentWidth - targetWidth) > UPDATE_THRESHOLD)
+            {
+                UpdateWallMesh(meshFilter, plane, targetWidth);
+                wasUpdated = true;
+            }
+
+            // Если стена была обновлена, вызываем событие
+            if (wasUpdated)
+            {
+                OnWallDetected?.Invoke(plane, wall);
+            }
+        }
+
+        private void CalculateWallDimensions(ARPlane plane, out Vector3 position, out float width)
+        {
+            // Находим крайние точки в мировых координатах
+            float minX = float.MaxValue;
+            float maxX = float.MinValue;
+            float lowestY = float.MaxValue;
+
+            Vector3 planeNormal = plane.normal.normalized;
+            Vector3 planeRight = Vector3.Cross(Vector3.up, planeNormal).normalized;
+
+            foreach (var point in plane.boundary)
+            {
+                Vector3 localPoint = new Vector3(point.x, 0, point.y);
+                Vector3 worldPoint = plane.transform.TransformPoint(localPoint);
+                
+                float projectedX = Vector3.Dot(worldPoint - plane.center, planeRight);
+                minX = Mathf.Min(minX, projectedX);
+                maxX = Mathf.Max(maxX, projectedX);
+                
+                lowestY = Mathf.Min(lowestY, worldPoint.y);
+            }
+
+            width = (maxX - minX) * WALL_EXTENSION;
+            
+            // Вычисляем позицию
+            position = plane.center;
+            position.y = lowestY;
+            position += planeNormal * 0.001f; // Смещение для z-fighting
+        }
+
+        private void UpdateWallMesh(MeshFilter meshFilter, ARPlane plane, float width)
+        {
+            var mesh = new Mesh();
+            var vertices = new List<Vector3>();
+            var triangles = new List<int>();
+            var uvs = new List<Vector2>();
+
+            // Создаем вершины для прямоугольной стены
+            vertices.Add(new Vector3(-width/2, WALL_BOTTOM_OFFSET, 0));  // Нижний левый
+            vertices.Add(new Vector3(-width/2, WALL_HEIGHT, 0));         // Верхний левый
+            vertices.Add(new Vector3(width/2, WALL_BOTTOM_OFFSET, 0));   // Нижний правый
+            vertices.Add(new Vector3(width/2, WALL_HEIGHT, 0));          // Верхний правый
+
+            // UV координаты для правильного масштабирования текстуры
+            float tileScale = 1f;
+            uvs.Add(new Vector2(0, 0));
+            uvs.Add(new Vector2(0, WALL_HEIGHT * tileScale));
+            uvs.Add(new Vector2(width * tileScale, 0));
+            uvs.Add(new Vector2(width * tileScale, WALL_HEIGHT * tileScale));
+
+            // Индексы для двух треугольников
+            triangles.Add(0); triangles.Add(1); triangles.Add(2);
+            triangles.Add(2); triangles.Add(1); triangles.Add(3);
+
+            mesh.vertices = vertices.ToArray();
+            mesh.triangles = triangles.ToArray();
+            mesh.uv = uvs.ToArray();
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+
+            meshFilter.mesh = mesh;
+        }
+
+        private bool IsPlaneRectangular(ARPlane plane)
+        {
+            if (plane.boundary.Length < 4) return false;
+
+            // Конвертируем boundary в массив
+            Vector2[] points = new Vector2[plane.boundary.Length];
+            plane.boundary.CopyTo(points);
+
+            // Находим углы между последовательными сегментами
+            for (int i = 0; i < points.Length; i++)
+            {
+                Vector2 current = points[i];
+                Vector2 next = points[(i + 1) % points.Length];
+                Vector2 nextNext = points[(i + 2) % points.Length];
+
+                Vector2 dir1 = (next - current).normalized;
+                Vector2 dir2 = (nextNext - next).normalized;
+
+                float angle = Vector2.Angle(dir1, dir2);
+                
+                // Проверяем, близок ли угол к 90 градусам
+                if (Mathf.Abs(angle - 90f) > 15f) // Допуск в 15 градусов
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void Update()
+        {
+            if (Time.time - lastUpdateTime < updateInterval) return;
+            lastUpdateTime = Time.time;
+
+            if (planeManager.subsystem != null && planeManager.subsystem.running)
+            {
+                UpdateWalls();
+            }
+        }
+
+        private void UpdateWalls()
+        {
+            var invalidWalls = new List<TrackableId>();
+
+            // Проверяем существующие стены
+            foreach (var wallPair in detectedWalls)
+            {
+                var plane = planeManager.GetPlane(wallPair.Key);
+                if (plane == null || !plane.gameObject.activeInHierarchy)
+                {
+                    invalidWalls.Add(wallPair.Key);
+                }
+            }
+
+            // Удаляем недействительные стены
+            foreach (var id in invalidWalls)
+            {
+                if (detectedWalls.TryGetValue(id, out var wallObject))
+                {
+                    Destroy(wallObject);
+                    detectedWalls.Remove(id);
+                    wallLastPositions.Remove(id);
+                }
+            }
+
+            // Обновляем существующие и добавляем новые стены
+            foreach (var plane in planeManager.trackables)
+            {
+                if (plane != null && plane.alignment == PlaneAlignment.Vertical)
+                {
+                    if (!detectedWalls.ContainsKey(plane.trackableId))
                     {
-                        boundaries[i] = plane.transform.TransformPoint(mesh.vertices[i]);
+                        CreateWall(plane);
                     }
-                    if (mergedBoundaries.Count == 0)
+                    else
                     {
-                        mergedBoundaries = boundaries.ToList();
+                        UpdatePlane(plane);
                     }
                 }
             }
         }
 
-        public void MergeWith(WallInfo other)
+        public Dictionary<TrackableId, GameObject> GetDetectedWalls()
         {
-            if (!isActive || !other.isActive) return;
-
-            foreach (var point in other.mergedBoundaries)
-            {
-                if (!mergedBoundaries.Any(p => Vector3.Distance(p, point) < 0.01f))
-                {
-                    mergedBoundaries.Add(point);
-                }
-            }
-
-            connectedWalls.UnionWith(other.connectedWalls);
-            connectedWalls.Add(other.trackableId);
+            return new Dictionary<TrackableId, GameObject>(detectedWalls);
         }
     }
 }

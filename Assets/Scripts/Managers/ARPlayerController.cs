@@ -31,7 +31,7 @@ public class ARPlayerController : MonoBehaviour
         // Находим XR Origin, если не назначен
         if (xrOrigin == null)
         {
-            xrOrigin = FindObjectOfType<XROrigin>();
+            xrOrigin = FindFirstObjectByType<XROrigin>();
             if (xrOrigin == null)
             {
                 Debug.LogError("ARPlayerController: Не найден XR Origin в сцене!");
