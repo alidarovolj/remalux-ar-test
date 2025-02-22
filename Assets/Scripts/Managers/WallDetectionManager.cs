@@ -15,12 +15,12 @@ namespace Remalux.AR
         private const float MIN_WALL_HEIGHT = 1.5f; // Уменьшаем высоту стены для тестирования
 
         [Header("Настройки обнаружения")]
-        [SerializeField] private float maxWallGap = 0.5f;    // Увеличиваем расстояние для объединения
-        [SerializeField] private float planeMergeAngleThreshold = 10f; // Увеличиваем допуск для углов слияния
-        [SerializeField] private float updateInterval = 0.2f; // Увеличиваем интервал обновления
-        [SerializeField] private float edgeDistanceThreshold = 0.5f; // Увеличиваем порог для краёв
-        [SerializeField] private float minWallArea = 0.3f; // Уменьшаем минимальную площадь для стены
-        [SerializeField] private float verticalAlignmentThreshold = 15f; // Увеличиваем допуск отклонения от вертикали
+        [SerializeField] private float maxWallGap = 0.3f;    // Уменьшаем расстояние для объединения
+        [SerializeField] private float planeMergeAngleThreshold = 15f; // Увеличиваем допуск для углов слияния
+        [SerializeField] private float updateInterval = 0.1f; // Уменьшаем интервал обновления
+        [SerializeField] private float edgeDistanceThreshold = 0.3f; // Уменьшаем порог для краёв
+        [SerializeField] private float minWallArea = 0.2f; // Уменьшаем минимальную площадь для стены
+        [SerializeField] private float verticalAlignmentThreshold = 20f; // Увеличиваем допуск отклонения от вертикали
         
         [Header("Настройки расширения")]
         [SerializeField] private float expansionRate = 1.05f; // Уменьшаем коэффициент расширения
@@ -48,9 +48,9 @@ namespace Remalux.AR
         private const float STABILITY_TIME = 0.5f; // Время для признания стены стабильной
 
         // Добавляем константы для размеров стен
-        public const float WALL_HEIGHT = 1.8f;          // Уменьшаем стандартную высоту стены с 2.4м до 1.8м
+        public const float WALL_HEIGHT = 2.0f;          // Стандартная высота стены (2.0 метра - типичная высота для жилых помещений)
         public const float WALL_EXTENSION = 1.01f;      // Минимальное расширение (1%)
-        public const float WALL_BOTTOM_OFFSET = -0.05f; // Небольшой отступ вниз
+        public const float WALL_BOTTOM_OFFSET = -0.1f; // Небольшой отступ вниз для лучшего прилегания к полу
 
         private float lastDebugTime = 0f;
         private const float DEBUG_LOG_INTERVAL = 0.5f; // Интервал для дебаг сообщений
@@ -95,23 +95,25 @@ namespace Remalux.AR
 
         private void ConfigurePlaneDetection()
         {
-            // Установим более агрессивные настройки обнаружения
+            // Устанавливаем агрессивные настройки обнаружения
             planeManager.requestedDetectionMode = PlaneDetectionMode.Vertical;
             
             if (planeManager.subsystem != null)
             {
-                // Явно включаем обнаружение вертикальных поверхностей
-                planeManager.subsystem.requestedPlaneDetectionMode = PlaneDetectionMode.Vertical;
-                
-                // Уменьшим минимальный размер обнаруживаемой плоскости
                 var subsystemDescriptor = planeManager.subsystem.subsystemDescriptor;
                 if (subsystemDescriptor != null)
                 {
-                    // Логируем возможности системы
-                    Debug.Log($"Plane Subsystem: {subsystemDescriptor.id}, Supports: Vertical={subsystemDescriptor.supportsVerticalPlaneDetection}, Horizontal={subsystemDescriptor.supportsHorizontalPlaneDetection}");
+                    // Устанавливаем минимальные значения для быстрого обнаружения
+                    planeManager.subsystem.requestedPlaneDetectionMode = PlaneDetectionMode.Vertical;
+                    
+                    // Включаем все возможные оптимизации
+                    if (subsystemDescriptor.supportsClassification)
+                    {
+                        planeManager.requestedDetectionMode |= PlaneDetectionMode.Vertical;
+                    }
+                    
+                    Debug.Log($"Plane Subsystem настроен для быстрого обнаружения: {subsystemDescriptor.id}");
                 }
-                
-                Debug.Log("Настройка параметров AR плоскостей выполнена успешно");
             }
         }
 
@@ -142,18 +144,6 @@ namespace Remalux.AR
 
         private void OnTrackablesChanged(ARTrackablesChangedEventArgs<ARPlane> eventArgs)
         {
-            // Добавим более подробное логирование
-            if (eventArgs.added != null && eventArgs.added.Count > 0)
-            {
-                Debug.Log($"Добавлено новых плоскостей: {eventArgs.added.Count}");
-                foreach (var plane in eventArgs.added)
-                {
-                    Debug.Log($"Новая плоскость: ID={plane.trackableId}, " +
-                             $"Alignment={plane.alignment}, " +
-                             $"Position={plane.transform.position}");
-                }
-            }
-
             // Обработка добавленных плоскостей
             if (eventArgs.added != null)
             {
@@ -197,107 +187,16 @@ namespace Remalux.AR
         {
             if (plane.alignment == PlaneAlignment.Vertical)
             {
-                // Отключаем визуализацию для новой плоскости
-                var meshRenderer = plane.gameObject.GetComponent<MeshRenderer>();
-                if (meshRenderer != null)
-                {
-                    meshRenderer.enabled = false;
-                }
-
-                var lineRenderer = plane.gameObject.GetComponent<LineRenderer>();
-                if (lineRenderer != null)
-                {
-                    lineRenderer.enabled = false;
-                }
-
-                // Отключаем ARPlaneMeshVisualizer
-                var visualizer = plane.gameObject.GetComponent<ARPlaneMeshVisualizer>();
-                if (visualizer != null)
-                {
-                    visualizer.enabled = false;
-                }
-
-                // Фильтруем частоту дебаг сообщений
-                bool shouldLog = Time.time - lastDebugTime >= DEBUG_LOG_INTERVAL;
-                if (shouldLog)
-                {
-                    lastDebugTime = Time.time;
-                    Debug.Log($"Plane Detection Mode: {planeManager.requestedDetectionMode}");
-                    Debug.Log($"Plane Manager enabled: {planeManager.enabled}");
-                }
-
-                // Проверяем, действительно ли плоскость вертикальная
+                // Быстрая проверка основных параметров
                 float angleFromVertical = Vector3.Angle(plane.normal, Vector3.up);
                 bool isNearlyVertical = Mathf.Abs(angleFromVertical - 90f) < verticalAlignmentThreshold;
-                
-                // Проверяем размер плоскости и соотношение сторон
-                float aspectRatio = plane.size.y / plane.size.x;
                 bool isLargeEnough = plane.size.x * plane.size.y > minWallArea;
-                bool hasValidAspectRatio = aspectRatio < 1.2f; // Увеличиваем допустимое соотношение сторон
                 
-                // Проверяем, не находится ли плоскость слишком высоко
-                bool isAtValidHeight = true;
-                float averageHeight = 0;
-                if (detectedWalls.Count > 0)
+                if (isNearlyVertical && isLargeEnough && !detectedWalls.ContainsKey(plane.trackableId))
                 {
-                    foreach (var wall in detectedWalls.Values)
-                    {
-                        if (wall != null && wall.activeInHierarchy)
-                        {
-                            averageHeight += wall.transform.position.y;
-                        }
-                    }
-                    averageHeight /= detectedWalls.Count;
-                    
-                    float heightDifference = Mathf.Abs(plane.center.y - averageHeight);
-                    isAtValidHeight = heightDifference < 0.5f; // Увеличиваем допуск по высоте до 50см
+                    // Быстрое создание стены без дополнительных проверок
+                    CreateWall(plane);
                 }
-
-                // Проверяем, нет ли уже стены рядом с этой позицией и с похожей ориентацией
-                bool isTooClose = false;
-                foreach (var kvp in detectedWalls)
-                {
-                    var existingPlane = planeManager.GetPlane(kvp.Key);
-                    if (existingPlane != null && kvp.Value.activeInHierarchy)
-                    {
-                        float distance = Vector3.Distance(kvp.Value.transform.position, plane.center);
-                        float angleToExisting = Vector3.Angle(existingPlane.normal, plane.normal);
-                        
-                        // Проверяем расстояние и угол между плоскостями
-                        if (distance < 0.3f && angleToExisting < 20f) // Уменьшаем минимальное расстояние
-                        {
-                            isTooClose = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (isNearlyVertical && isLargeEnough && hasValidAspectRatio && isAtValidHeight && !isTooClose)
-                {
-                    Debug.Log($"WallDetectionManager: Обработка вертикальной плоскости {plane.trackableId}");
-                    Debug.Log($"Plane size: {plane.size}, Normal: {plane.normal}, Angle from vertical: {angleFromVertical}, Aspect ratio: {aspectRatio}");
-                    
-                    if (!detectedWalls.ContainsKey(plane.trackableId))
-                    {
-                        Debug.Log($"WallDetectionManager: Создание новой стены для плоскости {plane.trackableId}");
-                        CreateWall(plane);
-                    }
-                    else
-                    {
-                        Debug.Log($"WallDetectionManager: Обновление существующей стены для плоскости {plane.trackableId}");
-                        UpdatePlane(plane);
-                    }
-                }
-                else
-                {
-                    Debug.Log($"WallDetectionManager: Плоскость отклонена. Угол: {angleFromVertical}, " +
-                             $"Размер: {plane.size}, Соотношение сторон: {aspectRatio}, " +
-                             $"Валидная высота: {isAtValidHeight}, Слишком близко: {isTooClose}");
-                }
-            }
-            else
-            {
-                Debug.Log($"WallDetectionManager: Пропуск не-вертикальной плоскости {plane.trackableId}, alignment: {plane.alignment}");
             }
         }
 
@@ -322,31 +221,93 @@ namespace Remalux.AR
             }
         }
 
-        private void CreateWall(ARPlane plane)
+        private void CalculateWallDimensions(ARPlane plane, out Vector3 position, out float width, out float height)
         {
-            if (detectedWalls.ContainsKey(plane.trackableId))
+            // Находим крайние точки в мировых координатах
+            float minX = float.MaxValue;
+            float maxX = float.MinValue;
+            float lowestY = float.MaxValue;
+            float highestY = float.MinValue;
+
+            Vector3 planeNormal = plane.normal.normalized;
+            Vector3 planeRight = Vector3.Cross(Vector3.up, planeNormal).normalized;
+
+            foreach (var point in plane.boundary)
             {
-                Debug.LogWarning($"WallDetectionManager: Попытка создать стену с существующим ID: {plane.trackableId}");
-                return;
+                Vector3 localPoint = new Vector3(point.x, 0, point.y);
+                Vector3 worldPoint = plane.transform.TransformPoint(localPoint);
+                
+                float projectedX = Vector3.Dot(worldPoint - plane.center, planeRight);
+                minX = Mathf.Min(minX, projectedX);
+                maxX = Mathf.Max(maxX, projectedX);
+                
+                lowestY = Mathf.Min(lowestY, worldPoint.y);
+                highestY = Mathf.Max(highestY, worldPoint.y);
             }
 
-            Debug.Log($"WallDetectionManager: Создание стены... Размер границы: {plane.boundary.Length}, Центр: {plane.center}, Нормаль: {plane.normal}");
+            width = (maxX - minX) * WALL_EXTENSION;
+            
+            // Вычисляем позицию
+            position = plane.center;
+            position.y = lowestY;
+            position += planeNormal * 0.001f; // Смещение для z-fighting
+
+            // Вычисляем высоту стены
+            height = Mathf.Min(highestY - lowestY, WALL_HEIGHT);
+        }
+
+        private void CreateWall(ARPlane plane)
+        {
+            if (detectedWalls.ContainsKey(plane.trackableId)) return;
 
             var wall = new GameObject($"Wall_{plane.trackableId}");
             
             // Создаем компоненты
             var meshFilter = wall.AddComponent<MeshFilter>();
             var meshRenderer = wall.AddComponent<MeshRenderer>();
-            meshRenderer.material = wallMaterial; // Используем оригинальный материал вместо создания нового
+            meshRenderer.material = wallMaterial;
             meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             meshRenderer.receiveShadows = false;
 
-            // Обновляем меш и позицию
-            UpdateWallMesh(meshFilter, plane, plane.size.x * WALL_EXTENSION);
+            // Вычисляем позицию и размеры
+            Vector3 targetPosition;
+            float targetWidth;
+            float targetHeight;
+            CalculateWallDimensions(plane, out targetPosition, out targetWidth, out targetHeight);
+
+            // Устанавливаем позицию и поворот
+            wall.transform.position = targetPosition;
+            wall.transform.rotation = Quaternion.LookRotation(-plane.normal.normalized, Vector3.up);
+
+            // Создаем меш с правильными размерами
+            var mesh = new Mesh();
+            var vertices = new Vector3[4];
+            var triangles = new int[] { 0, 1, 2, 2, 1, 3 };
+            var uvs = new Vector2[4];
+
+            // Создаем вершины для прямоугольной стены
+            vertices[0] = new Vector3(-targetWidth/2, WALL_BOTTOM_OFFSET, 0);
+            vertices[1] = new Vector3(-targetWidth/2, targetHeight, 0);
+            vertices[2] = new Vector3(targetWidth/2, WALL_BOTTOM_OFFSET, 0);
+            vertices[3] = new Vector3(targetWidth/2, targetHeight, 0);
+
+            // UV координаты для правильного масштабирования текстуры
+            float tileScale = 1f;
+            uvs[0] = new Vector2(0, 0);
+            uvs[1] = new Vector2(0, targetHeight * tileScale);
+            uvs[2] = new Vector2(targetWidth * tileScale, 0);
+            uvs[3] = new Vector2(targetWidth * tileScale, targetHeight * tileScale);
+
+            mesh.vertices = vertices;
+            mesh.triangles = triangles;
+            mesh.uv = uvs;
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+
+            meshFilter.mesh = mesh;
             
             detectedWalls.Add(plane.trackableId, wall);
-            
-            Debug.Log($"WallDetectionManager: Стена создана успешно. Всего стен: {detectedWalls.Count}");
+            wallLastPositions.Add(plane.trackableId, targetPosition);
             
             OnWallDetected?.Invoke(plane, wall);
         }
@@ -361,7 +322,8 @@ namespace Remalux.AR
             // Вычисляем новую позицию и размеры
             Vector3 targetPosition;
             float targetWidth;
-            CalculateWallDimensions(plane, out targetPosition, out targetWidth);
+            float targetHeight;
+            CalculateWallDimensions(plane, out targetPosition, out targetWidth, out targetHeight);
 
             // Проверяем, нужно ли обновлять стену
             if (!wallLastPositions.ContainsKey(plane.trackableId) ||
@@ -379,9 +341,34 @@ namespace Remalux.AR
 
             // Обновляем меш только если размер изменился
             float currentWidth = meshFilter.mesh.bounds.size.x;
-            if (Mathf.Abs(currentWidth - targetWidth) > UPDATE_THRESHOLD)
+            float currentHeight = meshFilter.mesh.bounds.size.y;
+            if (Mathf.Abs(currentWidth - targetWidth) > UPDATE_THRESHOLD ||
+                Mathf.Abs(currentHeight - targetHeight) > UPDATE_THRESHOLD)
             {
-                UpdateWallMesh(meshFilter, plane, targetWidth);
+                // Обновляем меш с новыми размерами
+                var mesh = new Mesh();
+                var vertices = new Vector3[4];
+                var triangles = new int[] { 0, 1, 2, 2, 1, 3 };
+                var uvs = new Vector2[4];
+
+                vertices[0] = new Vector3(-targetWidth/2, WALL_BOTTOM_OFFSET, 0);
+                vertices[1] = new Vector3(-targetWidth/2, targetHeight, 0);
+                vertices[2] = new Vector3(targetWidth/2, WALL_BOTTOM_OFFSET, 0);
+                vertices[3] = new Vector3(targetWidth/2, targetHeight, 0);
+
+                float tileScale = 1f;
+                uvs[0] = new Vector2(0, 0);
+                uvs[1] = new Vector2(0, targetHeight * tileScale);
+                uvs[2] = new Vector2(targetWidth * tileScale, 0);
+                uvs[3] = new Vector2(targetWidth * tileScale, targetHeight * tileScale);
+
+                mesh.vertices = vertices;
+                mesh.triangles = triangles;
+                mesh.uv = uvs;
+                mesh.RecalculateNormals();
+                mesh.RecalculateBounds();
+
+                meshFilter.mesh = mesh;
                 wasUpdated = true;
             }
 
@@ -390,69 +377,6 @@ namespace Remalux.AR
             {
                 OnWallDetected?.Invoke(plane, wall);
             }
-        }
-
-        private void CalculateWallDimensions(ARPlane plane, out Vector3 position, out float width)
-        {
-            // Находим крайние точки в мировых координатах
-            float minX = float.MaxValue;
-            float maxX = float.MinValue;
-            float lowestY = float.MaxValue;
-
-            Vector3 planeNormal = plane.normal.normalized;
-            Vector3 planeRight = Vector3.Cross(Vector3.up, planeNormal).normalized;
-
-            foreach (var point in plane.boundary)
-            {
-                Vector3 localPoint = new Vector3(point.x, 0, point.y);
-                Vector3 worldPoint = plane.transform.TransformPoint(localPoint);
-                
-                float projectedX = Vector3.Dot(worldPoint - plane.center, planeRight);
-                minX = Mathf.Min(minX, projectedX);
-                maxX = Mathf.Max(maxX, projectedX);
-                
-                lowestY = Mathf.Min(lowestY, worldPoint.y);
-            }
-
-            width = (maxX - minX) * WALL_EXTENSION;
-            
-            // Вычисляем позицию
-            position = plane.center;
-            position.y = lowestY;
-            position += planeNormal * 0.001f; // Смещение для z-fighting
-        }
-
-        private void UpdateWallMesh(MeshFilter meshFilter, ARPlane plane, float width)
-        {
-            var mesh = new Mesh();
-            var vertices = new List<Vector3>();
-            var triangles = new List<int>();
-            var uvs = new List<Vector2>();
-
-            // Создаем вершины для прямоугольной стены
-            vertices.Add(new Vector3(-width/2, WALL_BOTTOM_OFFSET, 0));  // Нижний левый
-            vertices.Add(new Vector3(-width/2, WALL_HEIGHT, 0));         // Верхний левый
-            vertices.Add(new Vector3(width/2, WALL_BOTTOM_OFFSET, 0));   // Нижний правый
-            vertices.Add(new Vector3(width/2, WALL_HEIGHT, 0));          // Верхний правый
-
-            // UV координаты для правильного масштабирования текстуры
-            float tileScale = 1f;
-            uvs.Add(new Vector2(0, 0));
-            uvs.Add(new Vector2(0, WALL_HEIGHT * tileScale));
-            uvs.Add(new Vector2(width * tileScale, 0));
-            uvs.Add(new Vector2(width * tileScale, WALL_HEIGHT * tileScale));
-
-            // Индексы для двух треугольников
-            triangles.Add(0); triangles.Add(1); triangles.Add(2);
-            triangles.Add(2); triangles.Add(1); triangles.Add(3);
-
-            mesh.vertices = vertices.ToArray();
-            mesh.triangles = triangles.ToArray();
-            mesh.uv = uvs.ToArray();
-            mesh.RecalculateNormals();
-            mesh.RecalculateBounds();
-
-            meshFilter.mesh = mesh;
         }
 
         private bool IsPlaneRectangular(ARPlane plane)
@@ -487,53 +411,48 @@ namespace Remalux.AR
 
         private void Update()
         {
-            if (Time.time - lastUpdateTime < updateInterval) return;
-            lastUpdateTime = Time.time;
-
-            if (planeManager.subsystem != null && planeManager.subsystem.running)
+            // Обновляем только если прошло достаточно времени
+            if (Time.time - lastUpdateTime >= updateInterval)
             {
+                lastUpdateTime = Time.time;
                 UpdateWalls();
             }
         }
 
         private void UpdateWalls()
         {
-            var invalidWalls = new List<TrackableId>();
+            if (!planeManager.subsystem?.running ?? true) return;
 
-            // Проверяем существующие стены
-            foreach (var wallPair in detectedWalls)
-            {
-                var plane = planeManager.GetPlane(wallPair.Key);
-                if (plane == null || !plane.gameObject.activeInHierarchy)
-                {
-                    invalidWalls.Add(wallPair.Key);
-                }
-            }
-
-            // Удаляем недействительные стены
-            foreach (var id in invalidWalls)
-            {
-                if (detectedWalls.TryGetValue(id, out var wallObject))
-                {
-                    Destroy(wallObject);
-                    detectedWalls.Remove(id);
-                    wallLastPositions.Remove(id);
-                }
-            }
-
-            // Обновляем существующие и добавляем новые стены
+            // Используем HashSet для быстрого поиска
+            var currentPlaneIds = new HashSet<TrackableId>();
+            
+            // Быстрое обновление существующих стен
             foreach (var plane in planeManager.trackables)
             {
                 if (plane != null && plane.alignment == PlaneAlignment.Vertical)
                 {
+                    currentPlaneIds.Add(plane.trackableId);
+                    
                     if (!detectedWalls.ContainsKey(plane.trackableId))
                     {
                         CreateWall(plane);
                     }
-                    else
+                    else if (Time.time - lastUpdateTime >= updateInterval)
                     {
                         UpdatePlane(plane);
                     }
+                }
+            }
+
+            // Быстрое удаление недействительных стен
+            var wallsToRemove = detectedWalls.Keys.Where(id => !currentPlaneIds.Contains(id)).ToList();
+            foreach (var id in wallsToRemove)
+            {
+                if (detectedWalls.TryGetValue(id, out var wall))
+                {
+                    Destroy(wall);
+                    detectedWalls.Remove(id);
+                    wallLastPositions.Remove(id);
                 }
             }
         }

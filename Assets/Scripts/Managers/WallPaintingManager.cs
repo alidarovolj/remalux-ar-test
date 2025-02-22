@@ -16,12 +16,7 @@ public class WallPaintingManager : MonoBehaviour
     [SerializeField] private float colorTransitionSpeed = 5f; // Скорость перехода цвета
     [SerializeField] private WallDetectionManager wallDetectionManager; // Добавляем ссылку
     
-    // Добавляем настройки размеров стены
-    [Header("Настройки размеров стены")]
-    [SerializeField] private float wallHeight = 4.0f; // Увеличиваем высоту
-    [SerializeField] private float wallWidthMultiplier = 1.5f; // Увеличиваем множитель ширины
-    [SerializeField] private float bottomOffset = -0.2f; // Увеличиваем смещение вниз
-    [SerializeField] private float forwardOffset = 0.005f; // Увеличиваем смещение вперед
+    private const float FORWARD_OFFSET = 0.005f; // Смещение вперед для предотвращения z-fighting
 
     private Dictionary<TrackableId, PaintedWallInfo> paintedWalls = new Dictionary<TrackableId, PaintedWallInfo>();
     private ARPlane currentHighlightedPlane;
@@ -31,17 +26,17 @@ public class WallPaintingManager : MonoBehaviour
 
     void Awake()
     {
-        Debug.Log("WallPaintingManager: Awake вызван");
+        // Убираем лишние логи
     }
 
     void OnEnable()
     {
-        Debug.Log("WallPaintingManager: OnEnable вызван");
+        // Убираем лишние логи
     }
 
     void Start()
     {
-        Debug.Log("WallPaintingManager: Start вызван");
+        Debug.Log($"ColorManager текущий цвет при старте: {(colorManager != null ? colorManager.GetCurrentColor().ToString() : "ColorManager is null")}");
 
         // Попытка найти WallDetectionManager, если он не назначен
         if (wallDetectionManager == null)
@@ -55,14 +50,6 @@ public class WallPaintingManager : MonoBehaviour
             Debug.LogWarning("WallPaintingManager: Используется другой экземпляр ARPlaneManager!");
             planeManager = wallDetectionManager.GetComponent<ARPlaneManager>();
         }
-
-        // Проверка компонентов
-        Debug.Log($"ColorManager: {(colorManager != null ? "найден" : "не найден")}");
-        Debug.Log($"RaycastManager: {(raycastManager != null ? "найден" : "не найден")}");
-        Debug.Log($"PlaneManager: {(planeManager != null ? "найден" : "не найден")}");
-        Debug.Log($"WallMaterial: {(wallMaterial != null ? "найден" : "не найден")}");
-        Debug.Log($"HighlightMaterial: {(highlightMaterial != null ? "найден" : "не найден")}");
-        Debug.Log($"WallDetectionManager: {(wallDetectionManager != null ? "найден" : "не найден")}");
 
         if (colorManager == null || raycastManager == null || planeManager == null ||
             wallMaterial == null || highlightMaterial == null || wallDetectionManager == null)
@@ -105,11 +92,13 @@ public class WallPaintingManager : MonoBehaviour
     private void UpdatePreview()
     {
         ARPlane hitPlane = GetHitPlane();
+        Debug.Log($"UpdatePreview: результат GetHitPlane: {(hitPlane != null ? hitPlane.trackableId.ToString() : "null")}");
 
         if (hitPlane != null && hitPlane.alignment == PlaneAlignment.Vertical)
         {
             if (currentHighlightedPlane != hitPlane)
             {
+                Debug.Log($"UpdatePreview: Смена подсвеченной плоскости с {(currentHighlightedPlane != null ? currentHighlightedPlane.trackableId.ToString() : "null")} на {hitPlane.trackableId}");
                 currentHighlightedPlane = hitPlane;
                 UpdatePreviewMesh(hitPlane);
             }
@@ -117,6 +106,10 @@ public class WallPaintingManager : MonoBehaviour
         }
         else
         {
+            if (currentHighlightedPlane != null)
+            {
+                Debug.Log("UpdatePreview: Сброс подсвеченной плоскости");
+            }
             currentHighlightedPlane = null;
             previewObject.SetActive(false);
         }
@@ -124,8 +117,6 @@ public class WallPaintingManager : MonoBehaviour
 
     private void UpdatePreviewMesh(ARPlane plane)
     {
-        Debug.Log($"Preview update - Plane position: {plane.transform.position}, rotation: {plane.transform.rotation}");
-
         var previewMeshFilter = previewObject.GetComponent<MeshFilter>();
         var previewRenderer = previewObject.GetComponent<MeshRenderer>();
 
@@ -139,6 +130,7 @@ public class WallPaintingManager : MonoBehaviour
         float minX = float.MaxValue;
         float maxX = float.MinValue;
         float lowestY = float.MaxValue;
+        float highestY = float.MinValue;
 
         // Получаем нормаль и направление вправо для плоскости
         Vector3 planeNormal = plane.normal.normalized;
@@ -156,23 +148,27 @@ public class WallPaintingManager : MonoBehaviour
             maxX = Mathf.Max(maxX, projectedX);
             
             lowestY = Mathf.Min(lowestY, worldPoint.y);
+            highestY = Mathf.Max(highestY, worldPoint.y);
         }
 
         // Вычисляем реальную ширину стены
         float width = (maxX - minX) * WallDetectionManager.WALL_EXTENSION;
+        
+        // Вычисляем реальную высоту стены, но не больше максимальной
+        float height = Mathf.Min(highestY - lowestY, WallDetectionManager.WALL_HEIGHT);
 
         // Создаем вершины
         vertices[0] = new Vector3(-width/2, WallDetectionManager.WALL_BOTTOM_OFFSET, 0);
-        vertices[1] = new Vector3(-width/2, WallDetectionManager.WALL_HEIGHT, 0);
+        vertices[1] = new Vector3(-width/2, height, 0);
         vertices[2] = new Vector3(width/2, WallDetectionManager.WALL_BOTTOM_OFFSET, 0);
-        vertices[3] = new Vector3(width/2, WallDetectionManager.WALL_HEIGHT, 0);
+        vertices[3] = new Vector3(width/2, height, 0);
 
         // UV координаты
         float tileScale = 1f;
         uvs[0] = new Vector2(0, 0);
-        uvs[1] = new Vector2(0, WallDetectionManager.WALL_HEIGHT * tileScale);
+        uvs[1] = new Vector2(0, height * tileScale);
         uvs[2] = new Vector2(width * tileScale, 0);
-        uvs[3] = new Vector2(width * tileScale, WallDetectionManager.WALL_HEIGHT * tileScale);
+        uvs[3] = new Vector2(width * tileScale, height * tileScale);
 
         previewMesh.vertices = vertices;
         previewMesh.uv = uvs;
@@ -186,23 +182,37 @@ public class WallPaintingManager : MonoBehaviour
         previewObject.transform.position = plane.center;
         previewObject.transform.rotation = Quaternion.LookRotation(-planeNormal, Vector3.up);
         previewObject.transform.position = new Vector3(previewObject.transform.position.x, lowestY, previewObject.transform.position.z);
-        previewObject.transform.position += planeNormal * forwardOffset;
+        previewObject.transform.position += planeNormal * FORWARD_OFFSET;
 
         // Устанавливаем цвет с прозрачностью
         Color previewColor = colorManager.GetCurrentColor();
         previewColor.a = previewAlpha;
         previewRenderer.material.color = previewColor;
-
-        Debug.Log($"Preview dimensions - Width: {width}m, Height: {WallDetectionManager.WALL_HEIGHT}m, Position: {previewObject.transform.position}");
     }
 
     private void HandleInput()
     {
         if (Input.GetMouseButtonDown(0) || (Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began))
         {
+            Vector2 screenPosition = Input.mousePosition;
+            if (Input.touchCount > 0)
+            {
+                screenPosition = Input.GetTouch(0).position;
+            }
+            Debug.Log($"Попытка взаимодействия. Позиция на экране: {screenPosition}");
+
+            var hitPlane = GetHitPlane();
+            Debug.Log($"Результат GetHitPlane: {(hitPlane != null ? hitPlane.trackableId.ToString() : "null")}");
+            
             if (currentHighlightedPlane != null)
             {
+                Debug.Log($"Текущая подсвеченная плоскость: {currentHighlightedPlane.trackableId}");
+                Debug.Log($"Текущий цвет для покраски: {colorManager.GetCurrentColor()}");
                 PaintWall(currentHighlightedPlane);
+            }
+            else
+            {
+                Debug.Log("Нет подсвеченной плоскости для покраски");
             }
         }
 
@@ -216,21 +226,11 @@ public class WallPaintingManager : MonoBehaviour
     private void PaintWall(ARPlane plane)
     {
         Color newColor = colorManager.GetCurrentColor();
-        Debug.Log($"Попытка покрасить стену. ID плоскости: {plane.trackableId}, Выбранный цвет: {newColor}");
+        Debug.Log($"Попытка покраски стены {plane.trackableId}. Новый цвет: {newColor}");
 
-        // Получаем основную стену из WallDetectionManager
-        var detectedWalls = wallDetectionManager.GetDetectedWalls();
-        if (detectedWalls.TryGetValue(plane.trackableId, out GameObject wallObject))
+        if (paintedWalls.TryGetValue(plane.trackableId, out var wallInfo))
         {
-            Debug.Log($"Найдена стена для покраски: {wallObject.name}");
-            
-            // Создаем или получаем информацию о покраске
-            if (!paintedWalls.TryGetValue(plane.trackableId, out var wallInfo))
-            {
-                Debug.Log("Создаем новую информацию о покраске");
-                wallInfo = new PaintedWallInfo(wallObject, Color.white);
-                paintedWalls.Add(plane.trackableId, wallInfo);
-            }
+            Debug.Log($"Стена найдена. Текущий цвет: {wallInfo.currentColor}, Целевой цвет: {wallInfo.targetColor}");
 
             // Сохраняем действие для отмены
             undoStack.Push(new PaintAction(plane.trackableId, wallInfo.currentColor, newColor));
@@ -241,35 +241,36 @@ public class WallPaintingManager : MonoBehaviour
 
             // Применяем новый цвет
             wallInfo.targetColor = newColor;
-            wallInfo.currentColor = newColor; // Мгновенно применяем цвет
+            wallInfo.currentColor = newColor;
 
             // Обновляем материал стены
-            var renderer = wallObject.GetComponent<MeshRenderer>();
+            var renderer = wallInfo.gameObject.GetComponent<MeshRenderer>();
             if (renderer != null)
             {
-                Debug.Log($"Обновляем материал стены. Текущий материал: {renderer.material.name}");
+                Debug.Log($"Обновляем материал стены. Текущий цвет материала: {(renderer.material != null ? renderer.material.color.ToString() : "null")}");
                 
-                // Создаем новый материал, если еще не создан
-                Material wallMat = renderer.material;
-                if (wallMat.name.Contains("Default"))
+                if (renderer.material == null || renderer.material.color != wallInfo.currentColor)
                 {
                     Debug.Log("Создаем новый материал для стены");
-                    wallMat = new Material(wallMaterial);
-                    renderer.material = wallMat;
+                    renderer.material = new Material(wallMaterial);
+                    renderer.material.color = newColor;
                 }
-
-                // Устанавливаем цвет
-                wallMat.color = newColor;
-                Debug.Log($"Цвет материала установлен: {wallMat.color}");
+                else
+                {
+                    Debug.Log("Обновляем цвет существующего материала");
+                    renderer.material.color = newColor;
+                }
+                
+                Debug.Log($"Новый цвет материала: {renderer.material.color}");
             }
             else
             {
-                Debug.LogError("MeshRenderer не найден на стене!");
+                Debug.LogError("MeshRenderer не найден на стене");
             }
         }
         else
         {
-            Debug.LogError($"Стена не найдена в WallDetectionManager для ID: {plane.trackableId}");
+            Debug.LogError($"Стена {plane.trackableId} не найдена в списке покрашенных стен");
         }
     }
 
@@ -283,15 +284,23 @@ public class WallPaintingManager : MonoBehaviour
                 if (renderer != null && renderer.material != null)
                 {
                     // Проверяем, нужно ли обновлять цвет
-                    if (wallInfo.currentColor != wallInfo.targetColor)
+                    if (!wallInfo.currentColor.Equals(wallInfo.targetColor))
                     {
+                        Debug.Log($"Обновление цвета стены. Текущий: {wallInfo.currentColor}, Целевой: {wallInfo.targetColor}");
+                        
                         // Плавный переход цвета
                         wallInfo.currentColor = Color.Lerp(
                             wallInfo.currentColor,
                             wallInfo.targetColor,
                             Time.deltaTime * colorTransitionSpeed
                         );
-                        renderer.material.color = wallInfo.currentColor;
+                        
+                        // Принудительно обновляем цвет материала
+                        if (renderer.material.color != wallInfo.currentColor)
+                        {
+                            renderer.material.color = wallInfo.currentColor;
+                            Debug.Log($"Цвет материала обновлен: {renderer.material.color}");
+                        }
                     }
                 }
             }
@@ -306,55 +315,58 @@ public class WallPaintingManager : MonoBehaviour
             screenPosition = Input.GetTouch(0).position;
         }
 
-        Debug.Log($"Screen position: {screenPosition}, Mouse position: {Input.mousePosition}");
-
-        // Получаем список плоскостей из WallDetectionManager
-        var detectedWalls = wallDetectionManager.GetDetectedWalls();
-        var planesList = new List<ARPlane>();
-        foreach (var wallPair in detectedWalls)
-        {
-            var plane = planeManager.GetPlane(wallPair.Key);
-            if (plane != null && plane.gameObject.activeInHierarchy)
-            {
-                planesList.Add(plane);
-            }
-        }
-        
-        Debug.Log($"Available planes: {planesList.Count}");
-        foreach (var p in planesList)
-        {
-            Debug.Log($"Plane: ID={p.trackableId}, Position={p.transform.position}, Alignment={p.alignment}");
-        }
+        Debug.Log($"GetHitPlane: Проверка точки {screenPosition}");
 
         List<ARRaycastHit> hits = new List<ARRaycastHit>();
-        if (raycastManager.Raycast(screenPosition, hits, TrackableType.PlaneWithinPolygon))
+        bool hasHits = raycastManager.Raycast(screenPosition, hits, TrackableType.PlaneWithinPolygon);
+        Debug.Log($"Raycast результат: {hasHits}, количество попаданий: {hits.Count}");
+
+        if (hasHits)
         {
-            Debug.Log($"Raycast hit count: {hits.Count}");
             foreach (var hit in hits)
             {
                 ARPlane plane = planeManager.GetPlane(hit.trackableId);
-                if (plane != null)
+                Debug.Log($"Проверка плоскости {hit.trackableId}, plane null? {plane == null}");
+                
+                if (plane != null && plane.alignment == PlaneAlignment.Vertical)
                 {
-                    Debug.Log($"Hit plane - Position: {plane.transform.position}, Alignment: {plane.alignment}");
-                    if (plane.alignment == PlaneAlignment.Vertical)
+                    Debug.Log($"Найдена вертикальная плоскость: {plane.trackableId}");
+                    
+                    // Находим крайние точки в мировых координатах
+                    float lowestY = float.MaxValue;
+                    float highestY = float.MinValue;
+
+                    foreach (var point in plane.boundary)
                     {
+                        Vector3 worldPoint = plane.transform.TransformPoint(new Vector3(point.x, 0, point.y));
+                        lowestY = Mathf.Min(lowestY, worldPoint.y);
+                        highestY = Mathf.Max(highestY, worldPoint.y);
+                    }
+
+                    float wallHeight = Mathf.Min(highestY - lowestY, WallDetectionManager.WALL_HEIGHT);
+                    float hitHeight = hit.pose.position.y - lowestY;
+
+                    Debug.Log($"Параметры стены: lowestY={lowestY:F3}, highestY={highestY:F3}, wallHeight={wallHeight:F3}");
+                    Debug.Log($"Точка касания: y={hit.pose.position.y:F3}, hitHeight={hitHeight:F3}");
+                    
+                    if (hitHeight >= WallDetectionManager.WALL_BOTTOM_OFFSET && hitHeight <= wallHeight)
+                    {
+                        Debug.Log($"Точка касания в допустимых пределах, возвращаем плоскость {plane.trackableId}");
                         return plane;
                     }
+                    else
+                    {
+                        Debug.Log($"Точка касания вне допустимых пределов: hitHeight={hitHeight:F3}, допустимый диапазон: [{WallDetectionManager.WALL_BOTTOM_OFFSET:F3}, {wallHeight:F3}]");
+                    }
+                }
+                else
+                {
+                    Debug.Log($"Плоскость не подходит: null={plane == null}, alignment={plane?.alignment}");
                 }
             }
         }
-        else
-        {
-            // Попробуем другой тип raycast
-            if (raycastManager.Raycast(screenPosition, hits, TrackableType.Planes))
-            {
-                Debug.Log($"General plane raycast hits: {hits.Count}");
-            }
-            else
-            {
-                Debug.Log($"No raycast hits. Screen dimensions: {Screen.width}x{Screen.height}");
-            }
-        }
+
+        Debug.Log("GetHitPlane: Подходящая плоскость не найдена");
         return null;
     }
 
@@ -394,12 +406,86 @@ public class WallPaintingManager : MonoBehaviour
 
     private void OnWallDetected(ARPlane plane, GameObject wall)
     {
-        // Добавляем стену в список покрашенных с начальным белым цветом
+        Debug.Log($"Обнаружена новая стена: {plane.trackableId}");
         if (!paintedWalls.ContainsKey(plane.trackableId))
         {
+            var meshFilter = wall.GetComponent<MeshFilter>();
+            var renderer = wall.GetComponent<MeshRenderer>();
+            if (renderer != null && meshFilter != null)
+            {
+                Debug.Log("Инициализация материала для новой стены");
+                // Создаем новый материал для стены
+                renderer.material = new Material(wallMaterial);
+                renderer.material.color = Color.white;
+
+                // Обновляем меш стены с правильными размерами
+                UpdateWallMesh(meshFilter, plane);
+                
+                Debug.Log($"Материал создан. Цвет: {renderer.material.color}");
+            }
+            else
+            {
+                Debug.LogError("MeshRenderer или MeshFilter не найден на новой стене");
+            }
+
             var wallInfo = new PaintedWallInfo(wall, Color.white);
             paintedWalls.Add(plane.trackableId, wallInfo);
+            Debug.Log($"Стена добавлена в список покрашенных. ID: {plane.trackableId}");
         }
+    }
+
+    private void UpdateWallMesh(MeshFilter meshFilter, ARPlane plane)
+    {
+        // Находим крайние точки в мировых координатах
+        float minX = float.MaxValue;
+        float maxX = float.MinValue;
+        float lowestY = float.MaxValue;
+        float highestY = float.MinValue;
+
+        Vector3 planeNormal = plane.normal.normalized;
+        Vector3 planeRight = Vector3.Cross(Vector3.up, planeNormal).normalized;
+
+        foreach (var point in plane.boundary)
+        {
+            Vector3 localPoint = new Vector3(point.x, 0, point.y);
+            Vector3 worldPoint = plane.transform.TransformPoint(localPoint);
+            
+            float projectedX = Vector3.Dot(worldPoint - plane.center, planeRight);
+            minX = Mathf.Min(minX, projectedX);
+            maxX = Mathf.Max(maxX, projectedX);
+            
+            lowestY = Mathf.Min(lowestY, worldPoint.y);
+            highestY = Mathf.Max(highestY, worldPoint.y);
+        }
+
+        float width = (maxX - minX) * WallDetectionManager.WALL_EXTENSION;
+        float height = Mathf.Min(highestY - lowestY, WallDetectionManager.WALL_HEIGHT);
+
+        var mesh = new Mesh();
+        var vertices = new Vector3[4];
+        var triangles = new int[] { 0, 1, 2, 2, 1, 3 };
+        var uvs = new Vector2[4];
+
+        // Создаем вершины для прямоугольной стены
+        vertices[0] = new Vector3(-width/2, WallDetectionManager.WALL_BOTTOM_OFFSET, 0);
+        vertices[1] = new Vector3(-width/2, height, 0);
+        vertices[2] = new Vector3(width/2, WallDetectionManager.WALL_BOTTOM_OFFSET, 0);
+        vertices[3] = new Vector3(width/2, height, 0);
+
+        // UV координаты для правильного масштабирования текстуры
+        float tileScale = 1f;
+        uvs[0] = new Vector2(0, 0);
+        uvs[1] = new Vector2(0, height * tileScale);
+        uvs[2] = new Vector2(width * tileScale, 0);
+        uvs[3] = new Vector2(width * tileScale, height * tileScale);
+
+        mesh.vertices = vertices;
+        mesh.triangles = triangles;
+        mesh.uv = uvs;
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+
+        meshFilter.mesh = mesh;
     }
 
     private class PaintedWallInfo
