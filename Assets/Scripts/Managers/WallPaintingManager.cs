@@ -315,53 +315,147 @@ public class WallPaintingManager : MonoBehaviour
             screenPosition = Input.GetTouch(0).position;
         }
 
-        Debug.Log($"GetHitPlane: Проверка точки {screenPosition}");
+        Debug.Log($"GetHitPlane: Проверка точки {screenPosition}, Размер экрана: {Screen.width}x{Screen.height}, " +
+                  $"Ориентация: {Screen.orientation}");
+
+        // В портретной ориентации проверяем координаты относительно повернутого экрана
+        if (Screen.orientation == ScreenOrientation.Portrait || 
+            Screen.orientation == ScreenOrientation.PortraitUpsideDown)
+        {
+            // В портретном режиме меняем местами проверку координат:
+            // x проверяем относительно ширины (Screen.width)
+            // y проверяем относительно высоты (Screen.height)
+            bool isXValid = screenPosition.x >= 0 && screenPosition.x < Screen.width;
+            bool isYValid = screenPosition.y >= 0 && screenPosition.y < Screen.height;
+            
+            Debug.Log($"Портретная ориентация - Проверка границ:" +
+                      $"\nX координата: {screenPosition.x} {'<'} {Screen.width} = {isXValid}" +
+                      $"\nY координата: {screenPosition.y} {'<'} {Screen.height} = {isYValid}");
+
+            if (!isXValid || !isYValid)
+            {
+                Debug.Log($"GetHitPlane: Точка {screenPosition} находится за пределами экрана {Screen.width}x{Screen.height} " +
+                         $"в портретной ориентации");
+                return null;
+            }
+        }
+        else
+        {
+            bool isXValid = screenPosition.x >= 0 && screenPosition.x < Screen.width;
+            bool isYValid = screenPosition.y >= 0 && screenPosition.y < Screen.height;
+            
+            Debug.Log($"Альбомная ориентация - Проверка границ:" +
+                      $"\nX координата: {screenPosition.x} {'<'} {Screen.width} = {isXValid}" +
+                      $"\nY координата: {screenPosition.y} {'<'} {Screen.height} = {isYValid}");
+
+            if (!isXValid || !isYValid)
+            {
+                Debug.Log($"GetHitPlane: Точка {screenPosition} находится за пределами экрана {Screen.width}x{Screen.height} " +
+                         $"в альбомной ориентации");
+                return null;
+            }
+        }
+
+        // Преобразуем координаты для raycast в зависимости от ориентации
+        Vector2 raycastPosition = screenPosition;
+        if (Screen.orientation == ScreenOrientation.Portrait || 
+            Screen.orientation == ScreenOrientation.PortraitUpsideDown)
+        {
+            raycastPosition.x = screenPosition.y;
+            raycastPosition.y = Screen.width - screenPosition.x;
+            Debug.Log($"GetHitPlane: Преобразованные координаты для raycast: {raycastPosition}");
+        }
 
         List<ARRaycastHit> hits = new List<ARRaycastHit>();
-        bool hasHits = raycastManager.Raycast(screenPosition, hits, TrackableType.PlaneWithinPolygon);
-        Debug.Log($"Raycast результат: {hasHits}, количество попаданий: {hits.Count}");
+        
+        // Расширяем типы отслеживаемых поверхностей
+        TrackableType trackableTypes = TrackableType.PlaneWithinPolygon | 
+                                     TrackableType.PlaneEstimated |
+                                     TrackableType.FeaturePoint;
+
+        bool hasHits = raycastManager.Raycast(raycastPosition, hits, trackableTypes);
+        Debug.Log($"Raycast результат: {hasHits}, количество попаданий: {hits.Count}, " +
+                  $"типы поиска: {trackableTypes}, " +
+                  $"позиция для raycast: {raycastPosition}");
+
+        // Проверяем состояние AR системы
+        if (planeManager != null && planeManager.subsystem != null)
+        {
+            Debug.Log($"AR система: активна={planeManager.subsystem.running}, " +
+                     $"режим определения={planeManager.requestedDetectionMode}, " +
+                     $"количество плоскостей={planeManager.trackables.count}");
+        }
 
         if (hasHits)
         {
+            // Сначала ищем вертикальные плоскости
             foreach (var hit in hits)
             {
                 ARPlane plane = planeManager.GetPlane(hit.trackableId);
-                Debug.Log($"Проверка плоскости {hit.trackableId}, plane null? {plane == null}");
+                Debug.Log($"Проверка плоскости {hit.trackableId}, " +
+                         $"plane null? {plane == null}, " +
+                         $"alignment={plane?.alignment}, " +
+                         $"normal={plane?.normal}, " +
+                         $"classifications={plane?.classifications}, " +
+                         $"размер={plane?.size}");
                 
-                if (plane != null && plane.alignment == PlaneAlignment.Vertical)
+                if (plane != null)
                 {
-                    Debug.Log($"Найдена вертикальная плоскость: {plane.trackableId}");
-                    
-                    // Находим крайние точки в мировых координатах
-                    float lowestY = float.MaxValue;
-                    float highestY = float.MinValue;
+                    // Проверяем, является ли плоскость частью обнаруженной стены
+                    bool isDetectedWall = wallDetectionManager != null && 
+                                        wallDetectionManager.GetDetectedWalls().ContainsKey(plane.trackableId);
 
-                    foreach (var point in plane.boundary)
+                    if (isDetectedWall)
                     {
-                        Vector3 worldPoint = plane.transform.TransformPoint(new Vector3(point.x, 0, point.y));
-                        lowestY = Mathf.Min(lowestY, worldPoint.y);
-                        highestY = Mathf.Max(highestY, worldPoint.y);
-                    }
-
-                    float wallHeight = Mathf.Min(highestY - lowestY, WallDetectionManager.WALL_HEIGHT);
-                    float hitHeight = hit.pose.position.y - lowestY;
-
-                    Debug.Log($"Параметры стены: lowestY={lowestY:F3}, highestY={highestY:F3}, wallHeight={wallHeight:F3}");
-                    Debug.Log($"Точка касания: y={hit.pose.position.y:F3}, hitHeight={hitHeight:F3}");
-                    
-                    if (hitHeight >= WallDetectionManager.WALL_BOTTOM_OFFSET && hitHeight <= wallHeight)
-                    {
-                        Debug.Log($"Точка касания в допустимых пределах, возвращаем плоскость {plane.trackableId}");
+                        Debug.Log($"Найдена обнаруженная стена: {plane.trackableId}");
                         return plane;
                     }
-                    else
+
+                    if (plane.alignment == PlaneAlignment.Vertical)
                     {
-                        Debug.Log($"Точка касания вне допустимых пределов: hitHeight={hitHeight:F3}, допустимый диапазон: [{WallDetectionManager.WALL_BOTTOM_OFFSET:F3}, {wallHeight:F3}]");
+                        // Находим крайние точки в мировых координатах
+                        float lowestY = float.MaxValue;
+                        float highestY = float.MinValue;
+
+                        foreach (var point in plane.boundary)
+                        {
+                            Vector3 worldPoint = plane.transform.TransformPoint(new Vector3(point.x, 0, point.y));
+                            lowestY = Mathf.Min(lowestY, worldPoint.y);
+                            highestY = Mathf.Max(highestY, worldPoint.y);
+                        }
+
+                        float wallHeight = Mathf.Min(highestY - lowestY, WallDetectionManager.WALL_HEIGHT);
+                        float hitHeight = hit.pose.position.y - lowestY;
+
+                        Debug.Log($"Параметры стены: lowestY={lowestY:F3}, highestY={highestY:F3}, " +
+                                $"wallHeight={wallHeight:F3}, hitHeight={hitHeight:F3}, " +
+                                $"расстояние до камеры={hit.distance:F3}м");
+                        
+                        if (hitHeight >= WallDetectionManager.WALL_BOTTOM_OFFSET && hitHeight <= wallHeight)
+                        {
+                            Debug.Log($"Найдена подходящая вертикальная плоскость: {plane.trackableId}");
+                            return plane;
+                        }
                     }
                 }
-                else
+            }
+
+            // Если вертикальные плоскости не найдены, проверяем все остальные
+            foreach (var hit in hits)
+            {
+                ARPlane plane = planeManager.GetPlane(hit.trackableId);
+                if (plane != null)
                 {
-                    Debug.Log($"Плоскость не подходит: null={plane == null}, alignment={plane?.alignment}");
+                    float angleFromVertical = Vector3.Angle(plane.normal, Vector3.up);
+                    Debug.Log($"Проверка угла плоскости: {angleFromVertical}° от вертикали, " +
+                             $"расстояние={hit.distance:F3}м");
+                    
+                    // Если плоскость близка к вертикальной (в пределах 30 градусов)
+                    if (Mathf.Abs(angleFromVertical - 90f) <= 30f)
+                    {
+                        Debug.Log($"Найдена почти вертикальная плоскость: {plane.trackableId}");
+                        return plane;
+                    }
                 }
             }
         }

@@ -7,29 +7,53 @@ using System.Collections;
 
 namespace Remalux.AR
 {
+    public class RoomCorner
+    {
+        public Vector3 position;
+        public Vector3 normal1;
+        public Vector3 normal2;
+        public TrackableId wall1Id;
+        public TrackableId wall2Id;
+        public float angle;
+        public float confidence;
+
+        public RoomCorner(Vector3 pos, Vector3 n1, Vector3 n2, TrackableId w1, TrackableId w2)
+        {
+            position = pos;
+            normal1 = n1.normalized;
+            normal2 = n2.normalized;
+            wall1Id = w1;
+            wall2Id = w2;
+            angle = Vector3.Angle(normal1, normal2);
+            
+            // Вычисляем уверенность на основе угла (90 градусов - идеальный угол для комнаты)
+            confidence = 1f - Mathf.Abs(angle - 90f) / 90f;
+        }
+
+        public bool IsValid()
+        {
+            // Угол должен быть близок к 90 градусам (допуск ±30 градусов)
+            return angle >= 60f && angle <= 120f && confidence > 0.5f;
+        }
+    }
+
     public class WallDetectionManager : MonoBehaviour
     {
         public delegate void WallDetectedHandler(ARPlane plane, GameObject wall);
+        public delegate void RoomCornerDetectedHandler(RoomCorner corner);
         public event WallDetectedHandler OnWallDetected;
+        public event RoomCornerDetectedHandler OnCornerDetected;
 
         private const float MIN_WALL_HEIGHT = 1.5f; // Уменьшаем высоту стены для тестирования
 
         [Header("Настройки обнаружения")]
-        [SerializeField] private float maxWallGap = 0.3f;    // Уменьшаем расстояние для объединения
-        [SerializeField] private float planeMergeAngleThreshold = 15f; // Увеличиваем допуск для углов слияния
-        [SerializeField] private float updateInterval = 0.1f; // Уменьшаем интервал обновления
-        [SerializeField] private float edgeDistanceThreshold = 0.3f; // Уменьшаем порог для краёв
-        [SerializeField] private float minWallArea = 0.2f; // Уменьшаем минимальную площадь для стены
-        [SerializeField] private float verticalAlignmentThreshold = 20f; // Увеличиваем допуск отклонения от вертикали
-        
-        [Header("Настройки расширения")]
-        [SerializeField] private float expansionRate = 1.05f; // Уменьшаем коэффициент расширения
+        [SerializeField] private float updateInterval = 0.05f;
+        [SerializeField] private float minWallArea = 0.1f;
+        [SerializeField] private float verticalAlignmentThreshold = 30f;
         
         [Header("Настройки углов")]
-        [SerializeField] private float cornerAngleThreshold = 95f; // Увеличиваем допуск для углов
-        [SerializeField] private float cornerDistanceThreshold = 3.0f; // Значительно увеличиваем расстояние для углов
-        [SerializeField] private float cornerHeightTolerance = 0.5f; // Увеличиваем допуск по высоте для углов
-        [SerializeField] private bool prioritizeCorners = true; // Приоритет обработки углов
+        [SerializeField] private float cornerAngleThreshold = 95f;
+        [SerializeField] private float cornerDistanceThreshold = 3.0f;
 
         [Header("Компоненты")]
         [SerializeField] private ARPlaneManager planeManager;
@@ -55,6 +79,10 @@ namespace Remalux.AR
         private float lastDebugTime = 0f;
         private const float DEBUG_LOG_INTERVAL = 0.5f; // Интервал для дебаг сообщений
 
+        private Dictionary<string, RoomCorner> detectedCorners = new Dictionary<string, RoomCorner>();
+        private const float CORNER_DETECTION_INTERVAL = 0.5f;
+        private float lastCornerDetectionTime;
+
         private void Start()
         {
             if (planeManager == null)
@@ -66,6 +94,8 @@ namespace Remalux.AR
             Debug.Log($"Plane Detection Mode: {planeManager.requestedDetectionMode}");
             Debug.Log($"Plane Manager enabled: {planeManager.enabled}");
             Debug.Log($"Plane Manager subsystem running: {planeManager.subsystem?.running}");
+            Debug.Log($"Plane Manager trackables count: {planeManager.trackables.count}");
+            Debug.Log($"Plane Manager prefab: {(planeManager.planePrefab != null ? "Assigned" : "Not Assigned")}");
             
             if (wallMaterial == null)
             {
@@ -73,21 +103,21 @@ namespace Remalux.AR
                 return;
             }
 
-            // Полностью отключаем визуализацию AR-плоскостей
+            // Включаем отображение AR-плоскостей для отладки
             if (planeManager.planePrefab != null)
             {
-                planeManager.planePrefab.SetActive(false);
+                planeManager.planePrefab.SetActive(true);
             }
             
-            // Отключаем отображение всех плоскостей
+            // Включаем обнаружение плоскостей
             planeManager.enabled = true;
-            planeManager.requestedDetectionMode = PlaneDetectionMode.Vertical;
-            planeManager.planePrefab = null;
+            planeManager.requestedDetectionMode = PlaneDetectionMode.Vertical | PlaneDetectionMode.Horizontal;
 
-            // Деактивируем существующие плоскости
+            // Активируем существующие плоскости для отладки
             foreach (var plane in planeManager.trackables)
             {
-                plane.gameObject.SetActive(false);
+                plane.gameObject.SetActive(true);
+                Debug.Log($"Existing plane: ID={plane.trackableId}, Alignment={plane.alignment}, Size={plane.size}");
             }
 
             ConfigurePlaneDetection();
@@ -95,22 +125,27 @@ namespace Remalux.AR
 
         private void ConfigurePlaneDetection()
         {
-            // Устанавливаем агрессивные настройки обнаружения
-            planeManager.requestedDetectionMode = PlaneDetectionMode.Vertical;
-            
             if (planeManager.subsystem != null)
             {
+                // Устанавливаем режим обнаружения
+                planeManager.requestedDetectionMode = PlaneDetectionMode.Vertical | PlaneDetectionMode.Horizontal;
+                
+                // Принудительно перезапускаем подсистему
+                if (!planeManager.subsystem.running)
+                {
+                    planeManager.subsystem.Start();
+                }
+                
                 var subsystemDescriptor = planeManager.subsystem.subsystemDescriptor;
                 if (subsystemDescriptor != null)
                 {
-                    // Устанавливаем минимальные значения для быстрого обнаружения
-                    planeManager.subsystem.requestedPlaneDetectionMode = PlaneDetectionMode.Vertical;
+                    Debug.Log($"Plane Subsystem capabilities:");
+                    Debug.Log($"- Supports Classification: {subsystemDescriptor.supportsClassification}");
+                    Debug.Log($"- Supports Bounding Box: {subsystemDescriptor.supportsBoundaryVertices}");
+                    Debug.Log($"- Supports Polygons: {subsystemDescriptor.supportsArbitraryPlaneDetection}");
                     
-                    // Включаем все возможные оптимизации
-                    if (subsystemDescriptor.supportsClassification)
-                    {
-                        planeManager.requestedDetectionMode |= PlaneDetectionMode.Vertical;
-                    }
+                    // Устанавливаем режим обнаружения в подсистеме
+                    planeManager.subsystem.requestedPlaneDetectionMode = PlaneDetectionMode.Vertical | PlaneDetectionMode.Horizontal;
                     
                     Debug.Log($"Plane Subsystem настроен для быстрого обнаружения: {subsystemDescriptor.id}");
                 }
@@ -149,6 +184,7 @@ namespace Remalux.AR
             {
                 foreach (var plane in eventArgs.added)
                 {
+                    Debug.Log($"OnTrackablesChanged: Обнаружена новая плоскость. ID: {plane.trackableId}, Выравнивание: {plane.alignment}, Размер: {plane.size}");
                     if (plane.alignment == PlaneAlignment.Vertical)
                     {
                         ProcessPlane(plane);
@@ -192,11 +228,25 @@ namespace Remalux.AR
                 bool isNearlyVertical = Mathf.Abs(angleFromVertical - 90f) < verticalAlignmentThreshold;
                 bool isLargeEnough = plane.size.x * plane.size.y > minWallArea;
                 
+                Debug.Log($"ProcessPlane: Проверка плоскости {plane.trackableId}:");
+                Debug.Log($"- Угол от вертикали: {angleFromVertical}°");
+                Debug.Log($"- Почти вертикальная: {isNearlyVertical}");
+                Debug.Log($"- Размер: {plane.size}, Площадь: {plane.size.x * plane.size.y}");
+                Debug.Log($"- Достаточно большая: {isLargeEnough}");
+                
                 if (isNearlyVertical && isLargeEnough && !detectedWalls.ContainsKey(plane.trackableId))
                 {
-                    // Быстрое создание стены без дополнительных проверок
+                    Debug.Log($"ProcessPlane: Создаем стену для плоскости {plane.trackableId}");
                     CreateWall(plane);
                 }
+                else
+                {
+                    Debug.Log($"ProcessPlane: Плоскость {plane.trackableId} не подходит для создания стены");
+                }
+            }
+            else
+            {
+                Debug.Log($"ProcessPlane: Плоскость {plane.trackableId} не вертикальная (alignment: {plane.alignment})");
             }
         }
 
@@ -258,7 +308,13 @@ namespace Remalux.AR
 
         private void CreateWall(ARPlane plane)
         {
-            if (detectedWalls.ContainsKey(plane.trackableId)) return;
+            if (detectedWalls.ContainsKey(plane.trackableId))
+            {
+                Debug.Log($"CreateWall: Стена для плоскости {plane.trackableId} уже существует");
+                return;
+            }
+
+            Debug.Log($"CreateWall: Начало создания стены для плоскости {plane.trackableId}");
 
             var wall = new GameObject($"Wall_{plane.trackableId}");
             
@@ -305,6 +361,8 @@ namespace Remalux.AR
             mesh.RecalculateBounds();
 
             meshFilter.mesh = mesh;
+            
+            Debug.Log($"CreateWall: Стена создана успешно. Размеры: {targetWidth}x{targetHeight}");
             
             detectedWalls.Add(plane.trackableId, wall);
             wallLastPositions.Add(plane.trackableId, targetPosition);
@@ -411,11 +469,29 @@ namespace Remalux.AR
 
         private void Update()
         {
+            // Добавляем периодическую диагностику
+            if (Time.time - lastDebugTime >= DEBUG_LOG_INTERVAL)
+            {
+                lastDebugTime = Time.time;
+                Debug.Log($"AR Debug - " +
+                         $"Planes: {planeManager.trackables.count}, " +
+                         $"Subsystem Running: {planeManager.subsystem?.running}, " +
+                         $"Walls: {detectedWalls.Count}, " +
+                         $"Corners: {detectedCorners.Count}");
+            }
+
             // Обновляем только если прошло достаточно времени
             if (Time.time - lastUpdateTime >= updateInterval)
             {
                 lastUpdateTime = Time.time;
                 UpdateWalls();
+            }
+
+            // Обновляем углы комнаты
+            if (Time.time - lastCornerDetectionTime >= CORNER_DETECTION_INTERVAL)
+            {
+                lastCornerDetectionTime = Time.time;
+                DetectRoomCorners();
             }
         }
 
@@ -457,9 +533,118 @@ namespace Remalux.AR
             }
         }
 
+        private void DetectRoomCorners()
+        {
+            Debug.Log("Начало поиска углов комнаты...");
+            Debug.Log($"Количество обнаруженных стен: {detectedWalls.Count}");
+            
+            var walls = detectedWalls.ToList();
+            var newCorners = new Dictionary<string, RoomCorner>();
+
+            // Проверяем каждую пару стен
+            for (int i = 0; i < walls.Count; i++)
+            {
+                for (int j = i + 1; j < walls.Count; j++)
+                {
+                    var wall1 = walls[i];
+                    var wall2 = walls[j];
+
+                    // Получаем нормали стен
+                    Vector3 normal1 = wall1.Value.transform.forward;
+                    Vector3 normal2 = wall2.Value.transform.forward;
+
+                    // Вычисляем угол между стенами
+                    float angle = Vector3.Angle(normal1, normal2);
+                    
+                    Debug.Log($"Проверка пары стен: {wall1.Key} и {wall2.Key}. Угол между ними: {angle}°");
+
+                    // Проверяем, образуют ли стены угол, близкий к 90 градусам
+                    if (Mathf.Abs(angle - 90f) <= cornerAngleThreshold)
+                    {
+                        Debug.Log($"Найден потенциальный угол между стенами {wall1.Key} и {wall2.Key}");
+                        // Находим точку пересечения стен
+                        if (TryFindIntersection(wall1.Value, wall2.Value, out Vector3 intersection))
+                        {
+                            var corner = new RoomCorner(intersection, normal1, normal2, wall1.Key, wall2.Key);
+                            
+                            if (corner.IsValid())
+                            {
+                                string cornerId = $"{wall1.Key}_{wall2.Key}";
+                                newCorners[cornerId] = corner;
+                                Debug.Log($"Обнаружен новый угол комнаты: ID={cornerId}, Позиция={intersection}, Угол={angle}°, Уверенность={corner.confidence}");
+
+                                // Если это новый угол, вызываем событие
+                                if (!detectedCorners.ContainsKey(cornerId))
+                                {
+                                    OnCornerDetected?.Invoke(corner);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Обновляем список углов
+            detectedCorners = newCorners;
+            Debug.Log($"Поиск углов завершен. Найдено углов: {detectedCorners.Count}");
+        }
+
+        private bool TryFindIntersection(GameObject wall1, GameObject wall2, out Vector3 intersection)
+        {
+            intersection = Vector3.zero;
+
+            // Получаем позиции и нормали стен
+            Vector3 pos1 = wall1.transform.position;
+            Vector3 pos2 = wall2.transform.position;
+            Vector3 normal1 = wall1.transform.forward;
+            Vector3 normal2 = wall2.transform.forward;
+
+            // Проверяем расстояние между стенами
+            float distance = Vector3.Distance(pos1, pos2);
+            if (distance > cornerDistanceThreshold)
+                return false;
+
+            // Находим точку пересечения плоскостей
+            Vector3 direction = Vector3.Cross(normal1, normal2);
+            if (direction.magnitude < 0.01f) // Стены параллельны
+                return false;
+
+            // Проецируем точки на плоскость XZ
+            Vector2 pos1_2D = new Vector2(pos1.x, pos1.z);
+            Vector2 pos2_2D = new Vector2(pos2.x, pos2.z);
+            Vector2 normal1_2D = new Vector2(normal1.x, normal1.z).normalized;
+            Vector2 normal2_2D = new Vector2(normal2.x, normal2.z).normalized;
+
+            // Находим точку пересечения в 2D
+            Vector2 intersection2D = FindIntersection2D(pos1_2D, normal1_2D, pos2_2D, normal2_2D);
+            
+            // Восстанавливаем Y-координату
+            float y = Mathf.Max(pos1.y, pos2.y);
+            intersection = new Vector3(intersection2D.x, y, intersection2D.y);
+
+            return true;
+        }
+
+        private Vector2 FindIntersection2D(Vector2 pos1, Vector2 normal1, Vector2 pos2, Vector2 normal2)
+        {
+            // Находим точку пересечения двух прямых в 2D
+            float d = normal1.x * normal2.y - normal1.y * normal2.x;
+            
+            if (Mathf.Abs(d) < 0.001f)
+                return (pos1 + pos2) * 0.5f;
+
+            float t = ((pos2.x - pos1.x) * normal2.y - (pos2.y - pos1.y) * normal2.x) / d;
+            return pos1 + normal1 * t;
+        }
+
         public Dictionary<TrackableId, GameObject> GetDetectedWalls()
         {
             return new Dictionary<TrackableId, GameObject>(detectedWalls);
+        }
+
+        public Dictionary<string, RoomCorner> GetDetectedCorners()
+        {
+            return new Dictionary<string, RoomCorner>(detectedCorners);
         }
     }
 }
