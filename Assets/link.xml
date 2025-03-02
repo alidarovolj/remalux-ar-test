@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<linker>
+  <assembly fullname="EnoxSoftware.OpenCVForUnity" preserve="all">
+    <type fullname="OpenCVForUnity.*" preserve="all" />
+    <type fullname="OpenCVForUnity.CoreModule.*" preserve="all" />
+    <type fullname="OpenCVForUnity.ImgprocModule.*" preserve="all" />
+    <type fullname="OpenCVForUnity.UnityUtils.*" preserve="all" />
+  </assembly>
+  <assembly fullname="System.Runtime.CompilerServices.Unsafe" preserve="all" />
+  <assembly fullname="System.Runtime" preserve="all" />
+  <assembly fullname="System.Runtime.InteropServices" preserve="all" />
+  <assembly fullname="netstandard" preserve="all" />
+</linker> 

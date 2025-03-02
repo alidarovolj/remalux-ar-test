@@ -1,0 +1,274 @@
+using UnityEngine;
+using UnityEditor;
+using System.IO;
+using System.Collections.Generic;
+using Remalux.AR;
+using UnityEngine.UI;
+
+public class CreatePaintMaterials : EditorWindow
+{
+      [MenuItem("Tools/Wall Painting/Create Paint Materials")]
+      public static void CreateMaterials()
+      {
+            // Создаем папку для материалов, если ее нет
+            string folderPath = "Assets/Materials/PaintMaterials";
+            if (!Directory.Exists(Application.dataPath + "/Materials"))
+            {
+                  Directory.CreateDirectory(Application.dataPath + "/Materials");
+            }
+
+            if (!Directory.Exists(Application.dataPath + "/Materials/PaintMaterials"))
+            {
+                  Directory.CreateDirectory(Application.dataPath + "/Materials/PaintMaterials");
+                  AssetDatabase.Refresh();
+            }
+
+            // Создаем базовые цвета
+            Color[] colors = new Color[]
+            {
+            Color.red,
+            Color.green,
+            Color.blue,
+            Color.yellow,
+            Color.cyan,
+            Color.magenta,
+            new Color(1.0f, 0.5f, 0.0f), // Оранжевый
+            new Color(0.5f, 0.0f, 0.5f), // Фиолетовый
+            Color.white,
+            Color.gray
+            };
+
+            string[] names = new string[]
+            {
+            "RedPaint",
+            "GreenPaint",
+            "BluePaint",
+            "YellowPaint",
+            "CyanPaint",
+            "MagentaPaint",
+            "OrangePaint",
+            "PurplePaint",
+            "WhitePaint",
+            "GrayPaint"
+            };
+
+            List<Material> materials = new List<Material>();
+
+            for (int i = 0; i < colors.Length; i++)
+            {
+                  string materialName = names[i];
+                  string materialPath = $"{folderPath}/{materialName}.mat";
+
+                  // Проверяем, существует ли уже такой материал
+                  Material material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+                  if (material == null)
+                  {
+                        // Создаем новый материал
+                        material = new Material(Shader.Find("Standard"));
+                        material.color = colors[i];
+                        AssetDatabase.CreateAsset(material, materialPath);
+                  }
+                  else
+                  {
+                        // Обновляем существующий материал
+                        material.color = colors[i];
+                        EditorUtility.SetDirty(material);
+                  }
+
+                  materials.Add(material);
+            }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log($"Создано {materials.Count} материалов для покраски");
+
+            // Находим все WallPaintingManager в сцене и устанавливаем им материалы
+            WallPaintingManager[] managers = GameObject.FindObjectsOfType<WallPaintingManager>();
+            foreach (var manager in managers)
+            {
+                  manager.paintMaterials = materials.ToArray();
+                  if (manager.defaultWallMaterial == null && materials.Count > 0)
+                  {
+                        manager.defaultWallMaterial = materials[0];
+                  }
+                  EditorUtility.SetDirty(manager);
+            }
+
+            if (managers.Length > 0)
+            {
+                  Debug.Log($"Материалы установлены для {managers.Length} WallPaintingManager");
+            }
+            else
+            {
+                  Debug.LogWarning("WallPaintingManager не найден в сцене");
+            }
+      }
+
+      [MenuItem("Tools/Wall Painting/Setup Wall Painting System")]
+      public static void SetupWallPaintingSystem()
+      {
+            // Находим или создаем WallPaintingManager
+            WallPaintingManager manager = GameObject.FindObjectOfType<WallPaintingManager>();
+            if (manager == null)
+            {
+                  GameObject managerObj = new GameObject("WallPaintingManager");
+                  manager = managerObj.AddComponent<WallPaintingManager>();
+                  Debug.Log("Создан новый WallPaintingManager");
+            }
+
+            // Находим или создаем WallPainter
+            WallPainter wallPainter = GameObject.FindObjectOfType<WallPainter>();
+            if (wallPainter == null)
+            {
+                  GameObject wallPainterObj = new GameObject("WallPainter");
+                  wallPainter = wallPainterObj.AddComponent<WallPainter>();
+                  Debug.Log("Создан новый WallPainter");
+            }
+
+            // Находим или создаем SimplePaintColorSelector
+            SimplePaintColorSelector colorSelector = GameObject.FindObjectOfType<SimplePaintColorSelector>();
+            if (colorSelector == null)
+            {
+                  // Создаем UI для селектора цветов
+                  GameObject canvasObj = GameObject.Find("Canvas");
+                  if (canvasObj == null)
+                  {
+                        canvasObj = new GameObject("Canvas");
+                        Canvas canvas = canvasObj.AddComponent<Canvas>();
+                        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                        canvasObj.AddComponent<CanvasScaler>();
+                        canvasObj.AddComponent<GraphicRaycaster>();
+                        Debug.Log("Создан новый Canvas");
+                  }
+
+                  GameObject selectorObj = new GameObject("PaintColorSelector");
+                  selectorObj.transform.SetParent(canvasObj.transform, false);
+                  RectTransform rectTransform = selectorObj.AddComponent<RectTransform>();
+                  rectTransform.anchorMin = new Vector2(0, 0);
+                  rectTransform.anchorMax = new Vector2(1, 0.2f);
+                  rectTransform.offsetMin = new Vector2(0, 0);
+                  rectTransform.offsetMax = new Vector2(0, 0);
+
+                  colorSelector = selectorObj.AddComponent<SimplePaintColorSelector>();
+                  Debug.Log("Создан новый SimplePaintColorSelector");
+            }
+
+            // Настраиваем связи между компонентами
+            manager.wallPainter = wallPainter;
+            manager.colorSelector = colorSelector;
+            manager.paintingUI = colorSelector.gameObject;
+
+            // Создаем материалы, если их нет
+            if (manager.paintMaterials == null || manager.paintMaterials.Length == 0)
+            {
+                  CreateMaterials();
+            }
+
+            // Передаем материалы в компоненты
+            if (manager.paintMaterials != null && manager.paintMaterials.Length > 0)
+            {
+                  wallPainter.availablePaints = manager.paintMaterials;
+                  wallPainter.defaultMaterial = manager.defaultWallMaterial;
+                  colorSelector.paintMaterials = manager.paintMaterials;
+            }
+
+            // Устанавливаем ссылки
+            colorSelector.wallPainter = wallPainter;
+
+            // Создаем кнопку сброса
+            if (colorSelector.resetButton == null)
+            {
+                  GameObject resetButtonObj = new GameObject("ResetButton");
+                  resetButtonObj.transform.SetParent(colorSelector.transform, false);
+                  RectTransform resetRectTransform = resetButtonObj.AddComponent<RectTransform>();
+                  resetRectTransform.anchorMin = new Vector2(0.5f, 0.8f);
+                  resetRectTransform.anchorMax = new Vector2(0.5f, 1.0f);
+                  resetRectTransform.sizeDelta = new Vector2(100, 40);
+
+                  UnityEngine.UI.Image resetImage = resetButtonObj.AddComponent<UnityEngine.UI.Image>();
+                  resetImage.color = Color.white;
+
+                  UnityEngine.UI.Button resetButton = resetButtonObj.AddComponent<UnityEngine.UI.Button>();
+                  colorSelector.resetButton = resetButton;
+
+                  GameObject textObj = new GameObject("Text");
+                  textObj.transform.SetParent(resetButtonObj.transform, false);
+                  RectTransform textRectTransform = textObj.AddComponent<RectTransform>();
+                  textRectTransform.anchorMin = Vector2.zero;
+                  textRectTransform.anchorMax = Vector2.one;
+                  textRectTransform.offsetMin = Vector2.zero;
+                  textRectTransform.offsetMax = Vector2.zero;
+
+                  UnityEngine.UI.Text text = textObj.AddComponent<UnityEngine.UI.Text>();
+                  text.text = "Сброс";
+                  text.alignment = TextAnchor.MiddleCenter;
+                  text.color = Color.black;
+                  text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            }
+
+            // Создаем контейнер для кнопок цветов
+            if (colorSelector.colorButtonsContainer == null)
+            {
+                  GameObject containerObj = new GameObject("ColorButtonsContainer");
+                  containerObj.transform.SetParent(colorSelector.transform, false);
+                  RectTransform containerRectTransform = containerObj.AddComponent<RectTransform>();
+                  containerRectTransform.anchorMin = new Vector2(0, 0);
+                  containerRectTransform.anchorMax = new Vector2(1, 0.7f);
+                  containerRectTransform.offsetMin = new Vector2(10, 10);
+                  containerRectTransform.offsetMax = new Vector2(-10, -10);
+
+                  UnityEngine.UI.HorizontalLayoutGroup layout = containerObj.AddComponent<UnityEngine.UI.HorizontalLayoutGroup>();
+                  layout.spacing = 10;
+                  layout.childAlignment = TextAnchor.MiddleCenter;
+                  layout.childForceExpandWidth = false;
+                  layout.childForceExpandHeight = false;
+
+                  colorSelector.colorButtonsContainer = containerRectTransform;
+            }
+
+            // Создаем префаб кнопки, если его нет
+            if (colorSelector.buttonPrefab == null)
+            {
+                  GameObject buttonObj = new GameObject("ColorButtonPrefab");
+
+                  RectTransform rectTransform = buttonObj.AddComponent<RectTransform>();
+                  rectTransform.sizeDelta = new Vector2(60, 60);
+
+                  UnityEngine.UI.Image image = buttonObj.AddComponent<UnityEngine.UI.Image>();
+                  image.color = Color.white;
+
+                  UnityEngine.UI.Button button = buttonObj.AddComponent<UnityEngine.UI.Button>();
+                  UnityEngine.UI.ColorBlock colors = button.colors;
+                  colors.highlightedColor = new Color(0.9f, 0.9f, 0.9f);
+                  colors.pressedColor = new Color(0.7f, 0.7f, 0.7f);
+                  button.colors = colors;
+
+                  SimpleColorButton colorButton = buttonObj.AddComponent<SimpleColorButton>();
+
+                  // Сохраняем префаб
+                  string prefabPath = "Assets/Prefabs";
+                  if (!Directory.Exists(Application.dataPath + "/Prefabs"))
+                  {
+                        Directory.CreateDirectory(Application.dataPath + "/Prefabs");
+                        AssetDatabase.Refresh();
+                  }
+
+                  string prefabFilePath = prefabPath + "/ColorButtonPrefab.prefab";
+
+#if UNITY_2018_3_OR_NEWER
+            GameObject prefabAsset = PrefabUtility.SaveAsPrefabAsset(buttonObj, prefabFilePath);
+            colorSelector.buttonPrefab = prefabAsset;
+#else
+                  UnityEngine.Object prefabAsset = PrefabUtility.CreatePrefab(prefabFilePath, buttonObj);
+                  colorSelector.buttonPrefab = prefabAsset as GameObject;
+#endif
+
+                  GameObject.DestroyImmediate(buttonObj);
+            }
+
+            EditorUtility.SetDirty(manager);
+            EditorUtility.SetDirty(wallPainter);
+            EditorUtility.SetDirty(colorSelector);
+
+            Debug.Log("Система покраски стен настроена");
+      }
+}

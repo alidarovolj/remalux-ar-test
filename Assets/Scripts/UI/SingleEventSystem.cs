@@ -25,6 +25,9 @@ namespace Remalux.AR
                 gameObject.AddComponent<StandaloneInputModule>();
             }
 
+            // Проверяем наличие других EventSystem в сцене
+            CheckForDuplicateEventSystems();
+
             base.Awake();
         }
 
@@ -36,6 +39,9 @@ namespace Remalux.AR
                 Destroy(gameObject);
                 return;
             }
+
+            // Проверяем наличие других EventSystem в сцене
+            CheckForDuplicateEventSystems();
 
             base.OnEnable();
         }
@@ -49,10 +55,8 @@ namespace Remalux.AR
             base.OnDisable();
         }
 
-        protected override void Update()
+        private void CheckForDuplicateEventSystems()
         {
-            base.Update();
-            
             // Проверяем наличие других EventSystem в сцене
             var systems = FindObjectsByType<EventSystem>(FindObjectsSortMode.None);
             if (systems.Length > 1)
@@ -62,10 +66,10 @@ namespace Remalux.AR
                     if (sys != null && sys != this && sys.gameObject != null)
                     {
                         Debug.LogWarning($"Найден дополнительный EventSystem '{sys.gameObject.name}'. Удаляем...");
-                        Destroy(sys.gameObject);
+                        DestroyImmediate(sys.gameObject);
                     }
                 }
             }
         }
     }
-} 
+}

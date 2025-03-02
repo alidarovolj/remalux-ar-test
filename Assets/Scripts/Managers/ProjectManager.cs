@@ -105,12 +105,12 @@ namespace Remalux.AR
             {
                 var wallData = new WallData
                 {
-                    id = wall.Key.ToString(),
-                    position = wall.Value.transform.position,
-                    rotation = wall.Value.transform.eulerAngles,
-                    scale = wall.Value.transform.localScale,
+                    id = wall.GetInstanceID().ToString(),
+                    position = wall.transform.position,
+                    rotation = wall.transform.eulerAngles,
+                    scale = wall.transform.localScale,
                     colorCode = colorManager.GetCurrentDuluxColor()?.code,
-                    area = CalculateWallArea(wall.Value)
+                    area = CalculateWallArea(wall)
                 };
 
                 currentProject.walls.Add(wallData);
@@ -120,7 +120,7 @@ namespace Remalux.AR
                 {
                     if (!currentProject.paintRequirements.ContainsKey(wallData.colorCode))
                         currentProject.paintRequirements[wallData.colorCode] = 0;
-                    
+
                     currentProject.paintRequirements[wallData.colorCode] += CalculatePaintRequired(wallData.area);
                 }
             }
@@ -230,4 +230,4 @@ namespace Remalux.AR
             return currentProject?.paintRequirements;
         }
     }
-} 
+}
