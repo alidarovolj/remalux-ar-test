@@ -136,13 +136,13 @@ namespace Remalux.AR
                   WallMaterialInstanceTracker instanceTracker = component.GetComponent<WallMaterialInstanceTracker>();
                   if (instanceTracker != null)
                   {
-                        Debug.Log("  - Найден компонент WallMaterialInstanceTracker");
-                        Debug.Log($"    - Оригинальный материал: {(instanceTracker.originalSharedMaterial != null ? instanceTracker.originalSharedMaterial.name : "null")}");
-                        Debug.Log($"    - Экземпляр материала: {(instanceTracker.instancedMaterial != null ? instanceTracker.instancedMaterial.name : "null")}");
+                        Debug.Log("  - Found WallMaterialInstanceTracker component");
+                        Debug.Log($"    - Original material: {(instanceTracker.OriginalSharedMaterial != null ? instanceTracker.OriginalSharedMaterial.name : "null")}");
+                        Debug.Log($"    - Current material: {(instanceTracker.instancedMaterial != null ? instanceTracker.instancedMaterial.name : "null")}");
                   }
                   else
                   {
-                        Debug.Log("  - Компонент WallMaterialInstanceTracker не найден");
+                        Debug.Log("  - WallMaterialInstanceTracker component not found");
                   }
 
                   // Проверяем наличие объектов на слое Wall

@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 namespace Remalux.AR
 {
@@ -8,127 +9,265 @@ namespace Remalux.AR
       /// </summary>
       public class WallMaterialInstanceTracker : MonoBehaviour
       {
-            public Material originalSharedMaterial;
-            public Material instancedMaterial;
+            [SerializeField]
+            private Material originalSharedMaterial;
+            private Dictionary<Material, Material> materialInstances = new Dictionary<Material, Material>();
+            private Renderer wallRenderer;
+            private bool initialized = false;
 
-            private Renderer _renderer;
+            // Public property for getting and setting the original material
+            public Material OriginalSharedMaterial
+            {
+                  get => originalSharedMaterial;
+                  set
+                  {
+                        originalSharedMaterial = value;
+#if UNITY_EDITOR
+                        if (!Application.isPlaying)
+                        {
+                              UnityEditor.EditorUtility.SetDirty(this);
+                        }
+#endif
+                  }
+            }
+
+            // Property for editor compatibility
+            public Material instancedMaterial
+            {
+                  get
+                  {
+                        if (wallRenderer != null)
+                        {
+                              return wallRenderer.sharedMaterial;
+                        }
+                        return null;
+                  }
+                  set
+                  {
+                        if (wallRenderer != null && value != null)
+                        {
+                              // Add material to dictionary if not already present
+                              if (!materialInstances.ContainsKey(value))
+                              {
+                                    Material instance = new Material(value);
+                                    instance.CopyPropertiesFromMaterial(value);
+                                    instance.name = $"{value.name}_Instance_{gameObject.name}";
+                                    materialInstances[value] = instance;
+                              }
+                              wallRenderer.sharedMaterial = materialInstances[value];
+#if UNITY_EDITOR
+                              if (!Application.isPlaying)
+                              {
+                                    UnityEditor.EditorUtility.SetDirty(wallRenderer);
+                                    UnityEditor.EditorUtility.SetDirty(this);
+                              }
+#endif
+                        }
+                  }
+            }
 
             private void Awake()
             {
-                  _renderer = GetComponent<Renderer>();
-                  if (_renderer == null)
+                  Initialize();
+            }
+
+            private void OnEnable()
+            {
+                  if (!initialized)
                   {
-                        Debug.LogError($"WallMaterialInstanceTracker на объекте {gameObject.name} не может найти компонент Renderer");
-                        return;
+                        Initialize();
+                  }
+            }
+
+            private void Initialize()
+            {
+                  if (initialized) return;
+
+                  wallRenderer = GetComponent<Renderer>();
+                  if (wallRenderer != null)
+                  {
+                        if (originalSharedMaterial == null)
+                        {
+                              OriginalSharedMaterial = wallRenderer.sharedMaterial;
+                              Debug.Log($"WallMaterialInstanceTracker: Saved original material for {gameObject.name}: {originalSharedMaterial?.name ?? "null"}");
+                        }
+
+                        // Create instance of current material if needed
+                        Material currentMaterial = wallRenderer.sharedMaterial;
+                        if (currentMaterial != null && !currentMaterial.name.Contains("_Instance_"))
+                        {
+                              Material instance = new Material(currentMaterial);
+                              instance.CopyPropertiesFromMaterial(currentMaterial);
+                              instance.name = $"{currentMaterial.name}_Instance_{gameObject.name}";
+                              materialInstances[currentMaterial] = instance;
+                              wallRenderer.sharedMaterial = instance;
+                              Debug.Log($"WallMaterialInstanceTracker: Created instance of current material for {gameObject.name}");
+                        }
+                  }
+                  else
+                  {
+                        Debug.LogError($"WallMaterialInstanceTracker: No Renderer found on {gameObject.name}");
                   }
 
-                  // Сохраняем оригинальный материал, если он еще не сохранен
-                  if (originalSharedMaterial == null)
-                  {
-                        originalSharedMaterial = _renderer.sharedMaterial;
-                        Debug.Log($"Сохранен оригинальный материал для {gameObject.name}: {(originalSharedMaterial != null ? originalSharedMaterial.name : "null")}");
-                  }
+                  initialized = true;
             }
 
             /// <summary>
             /// Применяет материал к объекту, создавая его экземпляр
             /// </summary>
-            /// <param name="material">Материал для применения</param>
-            public void ApplyMaterial(Material material)
+            public void ApplyMaterial(Material newMaterial)
             {
-                  if (_renderer == null)
+                  if (!initialized)
                   {
-                        _renderer = GetComponent<Renderer>();
-                        if (_renderer == null)
-                        {
-                              Debug.LogError($"WallMaterialInstanceTracker на объекте {gameObject.name} не может найти компонент Renderer");
-                              return;
-                        }
+                        Initialize();
                   }
 
-                  if (material == null)
+                  if (wallRenderer == null)
                   {
-                        Debug.LogWarning($"Попытка применить null материал к объекту {gameObject.name}");
+                        Debug.LogError($"WallMaterialInstanceTracker: No Renderer found on {gameObject.name}");
                         return;
                   }
 
-                  // Сохраняем оригинальный материал, если он еще не сохранен
-                  if (originalSharedMaterial == null)
+                  if (newMaterial == null)
                   {
-                        originalSharedMaterial = _renderer.sharedMaterial;
+                        Debug.LogError($"WallMaterialInstanceTracker: Attempted to apply null material to {gameObject.name}");
+                        return;
                   }
 
-                  // Создаем экземпляр материала
-                  instancedMaterial = new Material(material);
-                  instancedMaterial.name = $"{material.name}_Instance_{gameObject.name}";
-
-                  // Применяем экземпляр материала
-                  // Используем sharedMaterial в режиме редактора, чтобы избежать утечек
-                  if (Application.isPlaying)
+                  try
                   {
-                        _renderer.material = instancedMaterial;
+                        // Check if we already have an instance for this material
+                        Material instanceMaterial;
+                        if (!materialInstances.TryGetValue(newMaterial, out instanceMaterial))
+                        {
+                              // Create new instance
+                              instanceMaterial = new Material(newMaterial);
+                              instanceMaterial.CopyPropertiesFromMaterial(newMaterial);
+                              instanceMaterial.name = $"{newMaterial.name}_Instance_{gameObject.name}";
+                              materialInstances[newMaterial] = instanceMaterial;
+                              Debug.Log($"WallMaterialInstanceTracker: Created new material instance {instanceMaterial.name}");
+                        }
+
+                        // Apply the material
+                        wallRenderer.sharedMaterial = instanceMaterial;
+                        Debug.Log($"WallMaterialInstanceTracker: Applied material {instanceMaterial.name} to {gameObject.name}");
+
+#if UNITY_EDITOR
+                        if (!Application.isPlaying)
+                        {
+                              UnityEditor.EditorUtility.SetDirty(gameObject);
+                              UnityEditor.EditorUtility.SetDirty(wallRenderer);
+                              UnityEditor.EditorUtility.SetDirty(this);
+                              UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
+                                    UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene()
+                              );
+                        }
+#endif
                   }
-                  else
+                  catch (System.Exception e)
                   {
-                        _renderer.sharedMaterial = instancedMaterial;
+                        Debug.LogError($"WallMaterialInstanceTracker: Error applying material to {gameObject.name}: {e.Message}");
+                  }
+            }
+
+            /// <summary>
+            /// Updates the material instance for editor compatibility
+            /// </summary>
+            public void UpdateMaterialInstance()
+            {
+                  if (!initialized)
+                  {
+                        Initialize();
                   }
 
-                  Debug.Log($"Применен материал {instancedMaterial.name} к объекту {gameObject.name}");
+                  if (wallRenderer != null)
+                  {
+                        Material currentMaterial = wallRenderer.sharedMaterial;
+                        if (currentMaterial != null && !currentMaterial.name.Contains("_Instance_"))
+                        {
+                              Material newInstance = new Material(currentMaterial);
+                              newInstance.CopyPropertiesFromMaterial(currentMaterial);
+                              newInstance.name = $"{currentMaterial.name}_Instance_{gameObject.name}";
+                              materialInstances[currentMaterial] = newInstance;
+                              wallRenderer.sharedMaterial = newInstance;
+                              Debug.Log($"WallMaterialInstanceTracker: Updated material instance for {gameObject.name}");
+
+#if UNITY_EDITOR
+                              if (!Application.isPlaying)
+                              {
+                                    UnityEditor.EditorUtility.SetDirty(gameObject);
+                                    UnityEditor.EditorUtility.SetDirty(wallRenderer);
+                                    UnityEditor.EditorUtility.SetDirty(this);
+                              }
+#endif
+                        }
+                  }
             }
 
             /// <summary>
             /// Восстанавливает оригинальный материал
             /// </summary>
-            public void RestoreOriginalMaterial()
+            public void ResetToOriginal()
             {
-                  if (_renderer == null)
+                  if (!initialized)
                   {
-                        _renderer = GetComponent<Renderer>();
-                        if (_renderer == null)
-                        {
-                              Debug.LogError($"WallMaterialInstanceTracker на объекте {gameObject.name} не может найти компонент Renderer");
-                              return;
-                        }
+                        Initialize();
                   }
 
-                  if (originalSharedMaterial != null)
+                  if (wallRenderer != null && originalSharedMaterial != null)
                   {
-                        _renderer.sharedMaterial = originalSharedMaterial;
-                        Debug.Log($"Восстановлен оригинальный материал {originalSharedMaterial.name} для объекта {gameObject.name}");
-                  }
-                  else
-                  {
-                        Debug.LogWarning($"Не удалось восстановить оригинальный материал для объекта {gameObject.name}, так как он не был сохранен");
+                        // Create instance of original material if needed
+                        Material instanceMaterial;
+                        if (!materialInstances.TryGetValue(originalSharedMaterial, out instanceMaterial))
+                        {
+                              instanceMaterial = new Material(originalSharedMaterial);
+                              instanceMaterial.CopyPropertiesFromMaterial(originalSharedMaterial);
+                              instanceMaterial.name = $"{originalSharedMaterial.name}_Instance_{gameObject.name}";
+                              materialInstances[originalSharedMaterial] = instanceMaterial;
+                        }
+
+                        wallRenderer.sharedMaterial = instanceMaterial;
+                        Debug.Log($"WallMaterialInstanceTracker: Reset to original material for {gameObject.name}");
+
+#if UNITY_EDITOR
+                        if (!Application.isPlaying)
+                        {
+                              UnityEditor.EditorUtility.SetDirty(gameObject);
+                              UnityEditor.EditorUtility.SetDirty(wallRenderer);
+                              UnityEditor.EditorUtility.SetDirty(this);
+                        }
+#endif
                   }
             }
 
-            /// <summary>
-            /// Обновляет экземпляр материала, если он существует
-            /// </summary>
-            public void UpdateMaterialInstance()
+            private void OnDestroy()
             {
-                  if (_renderer == null || instancedMaterial == null)
-                        return;
-
-                  // Проверяем, использует ли рендерер экземпляр материала
-                  if (Application.isPlaying)
+                  // Clean up material instances
+                  foreach (var material in materialInstances.Values)
                   {
-                        // В режиме игры используем material
-                        if (_renderer.material != instancedMaterial)
+                        if (material != null)
                         {
-                              _renderer.material = instancedMaterial;
-                              Debug.Log($"Обновлен экземпляр материала для объекта {gameObject.name}");
+                              if (Application.isPlaying)
+                              {
+                                    Destroy(material);
+                              }
+                              else
+                              {
+                                    DestroyImmediate(material);
+                              }
                         }
                   }
-                  else
+                  materialInstances.Clear();
+            }
+
+#if UNITY_EDITOR
+            private void OnValidate()
+            {
+                  if (!initialized && !Application.isPlaying)
                   {
-                        // В режиме редактора используем sharedMaterial, чтобы избежать утечек
-                        if (_renderer.sharedMaterial != instancedMaterial)
-                        {
-                              _renderer.sharedMaterial = instancedMaterial;
-                              Debug.Log($"Обновлен экземпляр материала для объекта {gameObject.name} (режим редактора)");
-                        }
+                        Initialize();
                   }
             }
+#endif
       }
 }

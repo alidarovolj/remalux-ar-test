@@ -8,6 +8,24 @@ namespace Remalux.AR
             private const string WALL_TAG = "Wall";
             private const int WALL_LAYER = 8; // Слой "Wall" имеет индекс 8
 
+            /// <summary>
+            /// Возвращает подходящий шейдер в зависимости от используемого рендер пайплайна
+            /// </summary>
+            private static Shader GetAppropriateShader()
+            {
+                  if (UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline != null)
+                  {
+                        // Для URP
+                        Debug.Log("Используется URP, возвращаем URP шейдер");
+                        return Shader.Find("Universal Render Pipeline/Lit");
+                  }
+                  else
+                  {
+                        // Для стандартного рендер пайплайна
+                        return Shader.Find("Standard");
+                  }
+            }
+
             [MenuItem("Tools/Wall Painting/Create Test Wall")]
             public static void CreateTestWall()
             {
@@ -30,7 +48,7 @@ namespace Remalux.AR
                   wallObject.transform.localScale = new Vector3(3, 1, 0.1f);
 
                   // Создаем материал для стены
-                  Material wallMaterial = new Material(Shader.Find("Standard"));
+                  Material wallMaterial = new Material(GetAppropriateShader());
                   wallMaterial.name = "WallMaterial";
                   wallMaterial.color = Color.white;
 
@@ -62,7 +80,7 @@ namespace Remalux.AR
                   GameObject roomObject = new GameObject("TestRoom");
 
                   // Создаем материал для стен
-                  Material wallMaterial = new Material(Shader.Find("Standard"));
+                  Material wallMaterial = new Material(GetAppropriateShader());
                   wallMaterial.name = "WallMaterial";
                   wallMaterial.color = Color.white;
 

@@ -284,25 +284,16 @@ namespace Remalux.AR
 
                   // Проверяем, есть ли компонент для отслеживания материалов
                   WallMaterialInstanceTracker tracker = wallObject.GetComponent<WallMaterialInstanceTracker>();
-                  if (tracker != null)
+                  if (tracker == null)
                   {
-                        // Используем метод компонента для применения материала
-                        tracker.ApplyMaterial(material);
-                  }
-                  else
-                  {
-                        // Создаем экземпляр материала
-                        Material instancedMaterial = new Material(material);
-                        instancedMaterial.name = $"{material.name}_Instance_{wallObject.name}";
-
-                        // Применяем экземпляр материала
-                        renderer.material = instancedMaterial;
-
-                        // Добавляем компонент для отслеживания
                         tracker = wallObject.AddComponent<WallMaterialInstanceTracker>();
-                        tracker.originalSharedMaterial = renderer.sharedMaterial;
-                        tracker.instancedMaterial = instancedMaterial;
+                        tracker.OriginalSharedMaterial = renderer.sharedMaterial;
+                        Debug.Log($"Added WallMaterialInstanceTracker to {wallObject.name}");
                   }
+
+                  // Apply material through the tracker
+                  tracker.ApplyMaterial(material);
+                  Debug.Log($"Applied material {material.name} to {wallObject.name} through WallMaterialInstanceTracker");
 
                   return true;
             }
@@ -363,8 +354,7 @@ namespace Remalux.AR
                                     if (tracker == null)
                                     {
                                           tracker = obj.AddComponent<WallMaterialInstanceTracker>();
-                                          tracker.originalSharedMaterial = sharedMaterial;
-                                          tracker.instancedMaterial = instancedMaterial;
+                                          tracker.OriginalSharedMaterial = sharedMaterial;
                                     }
 
                                     fixedCount++;

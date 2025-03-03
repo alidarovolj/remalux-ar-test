@@ -6,6 +6,24 @@ namespace Remalux.AR
 {
       public static class WallPainterSharedMaterialFixer
       {
+            /// <summary>
+            /// Возвращает подходящий шейдер в зависимости от используемого рендер пайплайна
+            /// </summary>
+            private static Shader GetAppropriateShader()
+            {
+                  if (UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline != null)
+                  {
+                        // Для URP
+                        Debug.Log("Используется URP, возвращаем URP шейдер");
+                        return Shader.Find("Universal Render Pipeline/Lit");
+                  }
+                  else
+                  {
+                        // Для стандартного рендер пайплайна
+                        return Shader.Find("Standard");
+                  }
+            }
+
             [MenuItem("Tools/Wall Painting/Fix/Fix Shared Materials")]
             public static void FixSharedMaterials()
             {
@@ -19,7 +37,7 @@ namespace Remalux.AR
                   {
                         if (obj.layer == 8) // Слой "Wall"
                         {
-                              bool wasFixed = FixWallObjectMaterials(obj);
+                              bool wasFixed = FixWallMaterial(obj);
                               if (wasFixed)
                               {
                                     fixedCount++;
@@ -30,49 +48,54 @@ namespace Remalux.AR
                   Debug.Log($"=== Исправлено {fixedCount} объектов стен ===");
             }
 
-            private static bool FixWallObjectMaterials(GameObject wallObject)
+            private static bool FixWallMaterial(GameObject wallObject)
             {
-                  Debug.Log($"Проверка материалов объекта {wallObject.name}...");
+                  Debug.Log($"Checking materials for object {wallObject.name}...");
                   bool anyChanges = false;
 
-                  // Проверяем наличие рендерера
+                  // Check for renderer
                   Renderer renderer = wallObject.GetComponent<Renderer>();
                   if (renderer != null)
                   {
-                        // Проверяем, использует ли объект общий материал
+                        // Check if using shared material
                         Material sharedMaterial = renderer.sharedMaterial;
                         if (sharedMaterial != null)
                         {
-                              Debug.Log($"  - Текущий общий материал: {sharedMaterial.name}");
+                              Debug.Log($"  - Current shared material: {sharedMaterial.name}");
 
-                              // Создаем экземпляр материала
-                              Material instancedMaterial = new Material(sharedMaterial);
-                              instancedMaterial.name = $"{sharedMaterial.name}_Instance_{wallObject.name}";
-
-                              // Применяем экземпляр материала
-                              renderer.material = instancedMaterial;
-
-                              Debug.Log($"  - Создан экземпляр материала: {instancedMaterial.name}");
-                              anyChanges = true;
-
-                              // Добавляем компонент для отслеживания изменений материала
+                              // Add or update WallMaterialInstanceTracker
                               WallMaterialInstanceTracker tracker = wallObject.GetComponent<WallMaterialInstanceTracker>();
                               if (tracker == null)
                               {
                                     tracker = wallObject.AddComponent<WallMaterialInstanceTracker>();
-                                    tracker.originalSharedMaterial = sharedMaterial;
-                                    tracker.instancedMaterial = instancedMaterial;
-                                    Debug.Log("  - Добавлен компонент WallMaterialInstanceTracker для отслеживания экземпляров материалов");
+                                    tracker.OriginalSharedMaterial = sharedMaterial;
+                                    Debug.Log("  - Added WallMaterialInstanceTracker component");
                               }
+
+                              // Create and apply material instance if needed
+                              if (!sharedMaterial.name.Contains("_Instance_"))
+                              {
+                                    Material instanceMaterial = new Material(sharedMaterial);
+                                    instanceMaterial.name = $"{sharedMaterial.name}_Instance_{wallObject.name}";
+                                    renderer.sharedMaterial = instanceMaterial;
+                                    tracker.instancedMaterial = instanceMaterial;
+                                    Debug.Log($"  - Created and applied material instance: {instanceMaterial.name}");
+                                    anyChanges = true;
+                              }
+
+                              // Mark objects as dirty
+                              EditorUtility.SetDirty(wallObject);
+                              EditorUtility.SetDirty(renderer);
+                              EditorUtility.SetDirty(tracker);
                         }
                         else
                         {
-                              Debug.LogWarning($"  - Объект {wallObject.name} не имеет общего материала");
+                              Debug.LogWarning($"  - Object {wallObject.name} has no shared material");
                         }
                   }
                   else
                   {
-                        Debug.LogError($"  - Объект {wallObject.name} не имеет компонента Renderer");
+                        Debug.LogError($"  - Object {wallObject.name} has no Renderer component");
                   }
 
                   return anyChanges;
@@ -179,7 +202,7 @@ namespace Remalux.AR
                   if (currentPaintMaterial == null)
                   {
                         // Создаем новый материал как запасной вариант
-                        currentPaintMaterial = new Material(Shader.Find("Standard"));
+                        currentPaintMaterial = new Material(GetAppropriateShader());
                         currentPaintMaterial.color = Color.white;
                         currentPaintMaterial.name = "Default_Wall_Material";
                         Debug.LogWarning("  - Не удалось получить материал из WallPainter, используется стандартный белый материал");
@@ -215,7 +238,7 @@ namespace Remalux.AR
 
                                           // Добавляем компонент для отслеживания
                                           tracker = obj.AddComponent<WallMaterialInstanceTracker>();
-                                          tracker.originalSharedMaterial = renderer.sharedMaterial;
+                                          tracker.OriginalSharedMaterial = renderer.sharedMaterial;
                                           tracker.instancedMaterial = instancedMaterial;
 
                                           Debug.Log($"  - Применен материал {instancedMaterial.name} к объекту {obj.name}");

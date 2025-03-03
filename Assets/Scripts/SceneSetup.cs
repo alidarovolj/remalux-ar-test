@@ -38,6 +38,10 @@ namespace Remalux.AR
 
             public void SetupScene()
             {
+                  // Check for existing components
+                  var existingWallPainter = FindObjectOfType<WallPainter>();
+                  var existingManager = FindObjectOfType<WallPaintingManager>();
+
                   // Проверяем наличие необходимых материалов
                   if (defaultWallMaterial == null)
                   {
@@ -49,40 +53,54 @@ namespace Remalux.AR
                         Debug.LogError("Paint Materials не заданы в SceneSetup. Система покраски не будет работать корректно.");
                   }
 
-                  // Создаем WallPainter
-                  GameObject wallPainterObj = new GameObject("WallPainter");
-                  wallPainter = wallPainterObj.AddComponent<WallPainter>();
+                  // Create or use existing WallPainter
+                  if (existingWallPainter != null)
+                  {
+                        wallPainter = existingWallPainter;
+                        Debug.Log("Using existing WallPainter");
+                  }
+                  else
+                  {
+                        GameObject wallPainterObj = new GameObject("WallPainter");
+                        wallPainter = wallPainterObj.AddComponent<WallPainter>();
+                        Debug.Log("Created new WallPainter");
+                  }
 
-                  // Настраиваем WallPainter
+                  // Configure WallPainter
                   wallPainter.defaultMaterial = defaultWallMaterial;
                   wallPainter.availablePaints = paintMaterials;
                   wallPainter.mainCamera = mainCamera;
                   wallPainter.wallLayerMask = wallLayerMask;
                   wallPainter.colorPreviewPrefab = colorPreviewPrefab;
 
-                  // Настраиваем UI
+                  // Setup UI
                   SetupUI();
 
-                  // Создаем WallPaintingManager
-                  GameObject managerObj = new GameObject("WallPaintingManager");
-                  paintingManager = managerObj.AddComponent<WallPaintingManager>();
+                  // Create or use existing WallPaintingManager
+                  if (existingManager != null)
+                  {
+                        paintingManager = existingManager;
+                        Debug.Log("Using existing WallPaintingManager");
+                  }
+                  else
+                  {
+                        GameObject managerObj = new GameObject("WallPaintingManager");
+                        paintingManager = managerObj.AddComponent<WallPaintingManager>();
+                        Debug.Log("Created new WallPaintingManager");
+                  }
 
-                  // Настраиваем WallPaintingManager
+                  // Configure WallPaintingManager
                   paintingManager.wallPainter = wallPainter;
                   paintingManager.colorSelector = colorSelector;
                   paintingManager.paintMaterials = paintMaterials;
                   paintingManager.defaultWallMaterial = defaultWallMaterial;
 
-                  // Если есть UI для покраски, настраиваем его
                   if (colorSelector != null)
                   {
                         paintingManager.paintingUI = colorSelector.gameObject;
                   }
 
-                  // Проверяем, что все компоненты настроены правильно
-                  Debug.Log("Система покраски стен настроена. Материалы: " +
-                           (paintingManager.paintMaterials != null ? paintingManager.paintMaterials.Length.ToString() : "null") +
-                           ", Default: " + (paintingManager.defaultWallMaterial != null ? "Set" : "null"));
+                  Debug.Log($"Wall painting system setup complete. Materials: {(paintingManager.paintMaterials != null ? paintingManager.paintMaterials.Length.ToString() : "null")}, Default: {(paintingManager.defaultWallMaterial != null ? "Set" : "null")}");
             }
 
             private void SetupUI()
@@ -187,7 +205,7 @@ namespace Remalux.AR
                   colorSelector.wallPainter = wallPainter;
                   colorSelector.resetButton = resetButton;
                   colorSelector.colorButtonsContainer = containerRect;
-                  colorSelector.buttonPrefab = buttonPrefab;
+                  colorSelector.colorButtonPrefab = buttonPrefab;
 
                   Debug.Log($"Настройка UI завершена. Контейнер для кнопок: {(containerRect != null ? "Создан" : "Не создан")}, Префаб кнопки: {(buttonPrefab != null ? "Задан" : "Не задан")}");
 

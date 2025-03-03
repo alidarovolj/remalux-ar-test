@@ -203,17 +203,17 @@ namespace Remalux.AR
                                           {
                                                 // Добавляем компонент для отслеживания
                                                 tracker = obj.AddComponent<WallMaterialInstanceTracker>();
-                                                tracker.originalSharedMaterial = sharedMaterial;
+                                                tracker.OriginalSharedMaterial = sharedMaterial;
 
                                                 // Создаем экземпляр материала
-                                                Material instancedMaterial = new Material(sharedMaterial);
-                                                instancedMaterial.name = $"{sharedMaterial.name}_Instance_{obj.name}";
+                                                Material instanceMaterial = new Material(sharedMaterial);
+                                                instanceMaterial.name = $"{sharedMaterial.name}_Instance_{obj.name}";
 
                                                 // Применяем экземпляр материала (используем sharedMaterial в режиме редактора)
-                                                renderer.sharedMaterial = instancedMaterial;
-                                                tracker.instancedMaterial = instancedMaterial;
+                                                renderer.sharedMaterial = instanceMaterial;
+                                                tracker.instancedMaterial = instanceMaterial;
 
-                                                Debug.Log($"  - Исправлен материал для объекта {obj.name}: {sharedMaterial.name} -> {instancedMaterial.name}");
+                                                Debug.Log($"  - Fixed material for object {obj.name}: {sharedMaterial.name} -> {instanceMaterial.name}");
                                                 fixedCount++;
                                           }
                                           else
@@ -249,25 +249,5 @@ namespace Remalux.AR
                   // Применяем материал через трекер
                   tracker.ApplyMaterial(material);
             }
-      }
-      /// <summary>
-      /// Безопасно применяет материал к объекту, создавая экземпляр материала
-      /// </summary>
-      private void ApplyMaterialDirectly(GameObject wallObject, Material material)
-      {
-            if (wallObject == null || material == null)
-                  return;
-
-            // Проверяем наличие компонента WallMaterialInstanceTracker
-            WallMaterialInstanceTracker tracker = wallObject.GetComponent<WallMaterialInstanceTracker>();
-            if (tracker == null)
-            {
-                  // Если компонента нет, добавляем его
-                  tracker = wallObject.AddComponent<WallMaterialInstanceTracker>();
-                  Debug.Log($"Добавлен компонент WallMaterialInstanceTracker к объекту {wallObject.name}");
-            }
-
-            // Применяем материал через трекер
-            tracker.ApplyMaterial(material);
       }
 }

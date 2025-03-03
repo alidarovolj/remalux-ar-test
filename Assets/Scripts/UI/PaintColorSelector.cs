@@ -17,78 +17,129 @@ namespace Remalux.AR
 
             private void Start()
             {
-                  if (wallPainter == null)
-                        wallPainter = FindObjectOfType<WallPainter>();
-
-                  if (resetButton != null)
-                        resetButton.onClick.AddListener(ResetWallColors);
-
+                  InitializeComponents();
                   CreateColorButtons();
+            }
+
+            private void InitializeComponents()
+            {
+                  // Find WallPainter if not assigned
+                  if (wallPainter == null)
+                  {
+                        wallPainter = FindObjectOfType<WallPainter>();
+                        if (wallPainter == null)
+                        {
+                              Debug.LogError("PaintColorSelector: WallPainter component not found!");
+                              return;
+                        }
+                  }
+
+                  // Get materials from WallPainter if not assigned
+                  if (paintMaterials == null || paintMaterials.Length == 0)
+                  {
+                        paintMaterials = wallPainter.availablePaints;
+                        if (paintMaterials == null || paintMaterials.Length == 0)
+                        {
+                              Debug.LogError("PaintColorSelector: No paint materials available!");
+                              return;
+                        }
+                  }
+
+                  // Setup reset button
+                  if (resetButton != null)
+                  {
+                        resetButton.onClick.RemoveAllListeners();
+                        resetButton.onClick.AddListener(ResetWallColors);
+                  }
             }
 
             private void CreateColorButtons()
             {
                   if (colorButtonPrefab == null || colorButtonsContainer == null || paintMaterials == null)
+                  {
+                        Debug.LogError("PaintColorSelector: Missing required components!");
                         return;
+                  }
 
                   // Clear existing buttons
-                  foreach (Transform child in colorButtonsContainer)
+                  foreach (var button in colorButtons)
                   {
-                        Destroy(child.gameObject);
+                        if (button != null)
+                        {
+                              Destroy(button.gameObject);
+                        }
                   }
                   colorButtons.Clear();
 
-                  // Create new buttons for each paint material
+                  // Create new buttons for each material
                   for (int i = 0; i < paintMaterials.Length; i++)
                   {
                         Material material = paintMaterials[i];
+                        if (material == null) continue;
+
                         GameObject buttonObj = Instantiate(colorButtonPrefab, colorButtonsContainer);
                         Button button = buttonObj.GetComponent<Button>();
 
-                        // Set button color to match paint material
-                        Image buttonImage = button.GetComponent<Image>();
-                        if (buttonImage != null && material != null)
+                        if (button != null)
                         {
-                              buttonImage.color = material.color;
+                              // Set button color
+                              Image buttonImage = button.GetComponent<Image>();
+                              if (buttonImage != null && material.HasProperty("_Color"))
+                              {
+                                    buttonImage.color = material.GetColor("_Color");
+                              }
+
+                              // Add click listener
+                              int index = i; // Capture index for lambda
+                              button.onClick.AddListener(() => SelectColor(index));
+                              colorButtons.Add(button);
                         }
-
-                        // Add click listener
-                        int index = i; // Capture index for lambda
-                        button.onClick.AddListener(() => SelectColor(index));
-
-                        colorButtons.Add(button);
                   }
 
                   // Select first color by default
-                  if (paintMaterials.Length > 0)
+                  if (colorButtons.Count > 0)
+                  {
                         SelectColor(0);
+                  }
             }
 
-            public void SelectColor(int index)
+            private void SelectColor(int index)
             {
                   if (index < 0 || index >= paintMaterials.Length)
                         return;
 
                   selectedColorIndex = index;
 
-                  // Update button visuals to show selection
+                  // Update button visuals
                   for (int i = 0; i < colorButtons.Count; i++)
                   {
-                        // Add visual indication of selection (e.g., outline or scale)
-                        colorButtons[i].transform.localScale = (i == selectedColorIndex)
-                            ? new Vector3(1.2f, 1.2f, 1.2f)
-                            : Vector3.one;
+                        if (colorButtons[i] != null)
+                        {
+                              colorButtons[i].transform.localScale = (i == selectedColorIndex)
+                                    ? new Vector3(1.2f, 1.2f, 1.2f)
+                                    : Vector3.one;
+                        }
                   }
 
-                  // Tell the WallPainter which color is selected
+                  // Update WallPainter
                   if (wallPainter != null)
+                  {
                         wallPainter.SelectPaintMaterial(index);
+                        Debug.Log($"PaintColorSelector: Selected color {index}, material: {paintMaterials[index].name}");
+                  }
+                  else
+                  {
+                        Debug.LogError("PaintColorSelector: WallPainter reference is missing!");
+                  }
             }
 
             public void ResetWallColors()
             {
                   if (wallPainter != null)
+                  {
                         wallPainter.ResetWallMaterials();
+                        Debug.Log("PaintColorSelector: Reset wall colors");
+                  }
             }
       }
 }

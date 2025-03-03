@@ -273,12 +273,13 @@ namespace Remalux.AR
 
             void Update()
             {
-                  if (!enableDebugging) return;
+                  if (!enableDebugging || wallPainter == null)
+                        return;
 
-                  // Отслеживаем клики мыши
-                  if (Input.GetMouseButtonDown(0))
+                  // Use UnityEngine.Input directly
+                  if (UnityEngine.Input.GetMouseButtonDown(0))
                   {
-                        Vector2 mousePosition = Input.mousePosition;
+                        Vector2 mousePosition = UnityEngine.Input.mousePosition;
                         Debug.Log($"WallPainterDebugger: Клик мыши в позиции {mousePosition}");
 
                         Ray ray = mainCamera.ScreenPointToRay(mousePosition);

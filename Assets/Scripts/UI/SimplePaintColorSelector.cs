@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
+using System.Collections;
 
 namespace Remalux.AR
 {
@@ -9,14 +10,33 @@ namespace Remalux.AR
       /// </summary>
       public class SimplePaintColorSelector : MonoBehaviour
       {
-            public WallPainter wallPainter;
-            public Material[] paintMaterials;
-            public Button resetButton;
-            public RectTransform colorButtonsContainer;
-            public GameObject buttonPrefab; // Простая кнопка UI
+            [SerializeField] public WallPainter wallPainter;
+            [SerializeField] public GameObject colorButtonPrefab;
+            [SerializeField] public Transform colorButtonsContainer;
+            [SerializeField] public Material[] paintMaterials;
+            [SerializeField] public Button resetButton;
 
-            private List<SimpleColorButton> colorButtons = new List<SimpleColorButton>();
+            private List<Button> colorButtons = new List<Button>();
             private int selectedColorIndex = -1;
+            private bool isInitialized = false;
+
+            /// <summary>
+            /// Возвращает подходящий шейдер в зависимости от используемого рендер пайплайна
+            /// </summary>
+            private Shader GetAppropriateShader()
+            {
+                  if (UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline != null)
+                  {
+                        // Для URP
+                        Debug.Log("Используется URP, возвращаем URP шейдер");
+                        return Shader.Find("Universal Render Pipeline/Lit");
+                  }
+                  else
+                  {
+                        // Для стандартного рендер пайплайна
+                        return Shader.Find("Standard");
+                  }
+            }
 
             private void Awake()
             {
@@ -26,320 +46,196 @@ namespace Remalux.AR
 
             private void Start()
             {
-                  // Проверяем, есть ли у нас материалы
-                  if (paintMaterials == null || paintMaterials.Length == 0)
-                  {
-                        // Пытаемся получить материалы из WallPaintingManager
-                        WallPaintingManager manager = FindObjectOfType<WallPaintingManager>();
-                        if (manager != null && manager.paintMaterials != null && manager.paintMaterials.Length > 0)
-                        {
-                              Debug.Log("Получаем материалы из WallPaintingManager");
-                              paintMaterials = manager.paintMaterials;
-                        }
-                        else
-                        {
-                              Debug.LogWarning("Не заданы материалы для покраски в SimplePaintColorSelector и не найдены в WallPaintingManager");
+                  Debug.Log("SimplePaintColorSelector: Starting initialization process");
+                  StartCoroutine(DelayedInitialization());
+            }
 
-                              // Создаем хотя бы один материал, чтобы система не падала
-                              paintMaterials = new Material[1];
-                              paintMaterials[0] = new Material(Shader.Find("Standard"));
-                              paintMaterials[0].name = "DefaultPaint";
-                              paintMaterials[0].color = Color.white;
-                              Debug.Log("SimplePaintColorSelector: создан стандартный материал для покраски");
-                        }
-                  }
+            private IEnumerator DelayedInitialization()
+            {
+                  yield return null; // Wait one frame
 
-                  // Проверяем, есть ли у нас WallPainter
-                  if (wallPainter == null)
+                  if (!isInitialized)
                   {
-                        // Пытаемся получить WallPainter из WallPaintingManager
-                        WallPaintingManager manager = FindObjectOfType<WallPaintingManager>();
-                        if (manager != null && manager.wallPainter != null)
+                        Debug.Log("SimplePaintColorSelector: Beginning delayed initialization");
+
+                        // Find WallPainter if not assigned
+                        if (wallPainter == null)
                         {
-                              Debug.Log("Получаем WallPainter из WallPaintingManager");
-                              wallPainter = manager.wallPainter;
-                        }
-                        else
-                        {
-                              // Пытаемся найти WallPainter в сцене
+                              Debug.Log("SimplePaintColorSelector: Looking for WallPainter...");
+                              yield return new WaitForSeconds(0.1f); // Small delay to ensure WallPainter has spawned
                               wallPainter = FindObjectOfType<WallPainter>();
                               if (wallPainter == null)
                               {
-                                    Debug.LogWarning("Не задан WallPainter в SimplePaintColorSelector и не найден в сцене");
-
-                                    // Создаем WallPainter, если его нет
-                                    GameObject wallPainterObj = new GameObject("WallPainter");
-                                    wallPainter = wallPainterObj.AddComponent<WallPainter>();
-                                    Debug.Log("SimplePaintColorSelector: создан новый WallPainter");
+                                    Debug.LogError("SimplePaintColorSelector: No WallPainter found!");
+                                    yield break;
                               }
+                              Debug.Log("SimplePaintColorSelector: Found WallPainter");
                         }
-                  }
 
-                  // Проверяем наличие контейнера и префаба заранее
-                  CheckContainerAndPrefab();
+                        // Wait for WallPainter to initialize with timeout
+                        float timeoutDuration = 5f;
+                        float elapsedTime = 0f;
 
-                  // Инициализируем селектор
-                  Initialize();
-            }
-
-            /// <summary>
-            /// Проверяет наличие контейнера и префаба кнопки, создает их при необходимости
-            /// </summary>
-            private void CheckContainerAndPrefab()
-            {
-                  // Проверяем наличие контейнера
-                  if (colorButtonsContainer == null)
-                  {
-                        Debug.LogWarning("Не задан контейнер для кнопок в SimplePaintColorSelector");
-
-                        // Пытаемся найти контейнер
-                        Transform parent = transform;
-                        colorButtonsContainer = parent.Find("ColorButtonsContainer") as RectTransform;
-                        if (colorButtonsContainer == null && parent.childCount > 0)
+                        while (!wallPainter.IsInitialized)
                         {
-                              // Ищем в дочерних объектах
-                              for (int i = 0; i < parent.childCount; i++)
+                              elapsedTime += Time.deltaTime;
+                              if (elapsedTime > timeoutDuration)
                               {
-                                    Transform child = parent.GetChild(i);
-                                    if (child.name.Contains("ColorButtons") || child.name.Contains("Container"))
-                                    {
-                                          colorButtonsContainer = child as RectTransform;
-                                          if (colorButtonsContainer != null)
-                                          {
-                                                Debug.Log($"Найден контейнер для кнопок: {colorButtonsContainer.name}");
-                                                break;
-                                          }
-                                    }
+                                    Debug.LogError("SimplePaintColorSelector: Timeout waiting for WallPainter initialization!");
+                                    yield break;
                               }
+                              yield return null;
                         }
 
-                        // Если контейнер все еще не найден, создаем его
-                        if (colorButtonsContainer == null)
-                        {
-                              Debug.LogWarning("Контейнер для кнопок не найден. Создаем новый контейнер.");
-                              GameObject containerObj = new GameObject("ColorButtonsContainer");
-                              containerObj.transform.SetParent(transform, false);
-                              colorButtonsContainer = containerObj.AddComponent<RectTransform>();
-                              colorButtonsContainer.anchorMin = new Vector2(0, 0);
-                              colorButtonsContainer.anchorMax = new Vector2(1, 0.2f);
-                              colorButtonsContainer.offsetMin = new Vector2(10, 10);
-                              colorButtonsContainer.offsetMax = new Vector2(-10, -10);
-
-                              // Добавляем компонент горизонтальной группы
-                              HorizontalLayoutGroup layout = containerObj.AddComponent<HorizontalLayoutGroup>();
-                              layout.spacing = 10;
-                              layout.childAlignment = TextAnchor.MiddleCenter;
-                              layout.childForceExpandWidth = false;
-                              layout.childForceExpandHeight = false;
-
-                              Debug.Log("SimplePaintColorSelector: создан новый контейнер для кнопок");
-                        }
-                  }
-
-                  // Проверяем наличие префаба кнопки
-                  if (buttonPrefab == null)
-                  {
-                        Debug.LogWarning("Префаб кнопки не задан. Попытка создать временный префаб.");
-                        buttonPrefab = CreateTemporaryButtonPrefab();
-
-                        if (buttonPrefab == null)
-                        {
-                              Debug.LogError("Не удалось создать временный префаб кнопки. Кнопки не будут созданы.");
-                        }
-                        else
-                        {
-                              Debug.Log("Создан временный префаб кнопки для SimplePaintColorSelector");
-                        }
+                        Debug.Log("SimplePaintColorSelector: WallPainter is initialized, proceeding with initialization");
+                        Initialize();
                   }
             }
 
-            /// <summary>
-            /// Инициализирует селектор цветов, создавая кнопки для каждого материала
-            /// </summary>
             public void Initialize()
             {
+                  // Find or get references
+                  if (wallPainter == null)
+                  {
+                        wallPainter = FindObjectOfType<WallPainter>();
+                        if (wallPainter == null)
+                        {
+                              Debug.LogError("SimplePaintColorSelector: No WallPainter found!");
+                              return;
+                        }
+                  }
+
+                  // Get materials from WallPainter if not assigned
                   if (paintMaterials == null || paintMaterials.Length == 0)
                   {
-                        Debug.LogWarning("Не заданы материалы для покраски в SimplePaintColorSelector");
-                        return;
+                        paintMaterials = wallPainter.availablePaints;
+                        if (paintMaterials == null || paintMaterials.Length == 0)
+                        {
+                              Debug.LogError("SimplePaintColorSelector: No paint materials available!");
+                              return;
+                        }
                   }
 
-                  // Проверяем наличие контейнера и префаба
-                  if (colorButtonsContainer == null || buttonPrefab == null)
+                  // Setup UI container
+                  if (colorButtonsContainer == null)
                   {
-                        Debug.LogError("Не задан контейнер для кнопок или префаб кнопки в SimplePaintColorSelector");
+                        GameObject container = new GameObject("ColorButtonsContainer");
+                        container.transform.SetParent(transform);
+                        RectTransform rectTransform = container.AddComponent<RectTransform>();
+                        rectTransform.anchorMin = Vector2.zero;
+                        rectTransform.anchorMax = Vector2.one;
+                        rectTransform.sizeDelta = Vector2.zero;
+                        colorButtonsContainer = container.transform;
+                  }
+
+                  // Setup button prefab
+                  if (colorButtonPrefab == null)
+                  {
+                        colorButtonPrefab = CreateDefaultButtonPrefab();
+                  }
+
+                  // Setup reset button
+                  if (resetButton != null)
+                  {
+                        resetButton.onClick.RemoveAllListeners();
+                        resetButton.onClick.AddListener(ResetWallColors);
+                  }
+
+                  CreateColorButtons();
+                  isInitialized = true;
+            }
+
+            private GameObject CreateDefaultButtonPrefab()
+            {
+                  GameObject buttonObj = new GameObject("ColorButton");
+                  RectTransform rectTransform = buttonObj.AddComponent<RectTransform>();
+                  rectTransform.sizeDelta = new Vector2(50, 50);
+
+                  Image image = buttonObj.AddComponent<Image>();
+                  Button button = buttonObj.AddComponent<Button>();
+                  button.targetGraphic = image;
+
+                  return buttonObj;
+            }
+
+            private void CreateColorButtons()
+            {
+                  if (colorButtonPrefab == null || colorButtonsContainer == null || paintMaterials == null)
+                  {
+                        Debug.LogError("SimplePaintColorSelector: Missing required components!");
                         return;
                   }
 
-                  Debug.Log($"SimplePaintColorSelector: начало инициализации. Материалов: {paintMaterials.Length}, Контейнер: {(colorButtonsContainer != null ? "Задан" : "Не задан")}, Префаб: {(buttonPrefab != null ? "Задан" : "Не задан")}");
-
-                  // Очищаем существующие кнопки, если они есть
+                  // Clear existing buttons
                   foreach (var button in colorButtons)
                   {
-                        if (button != null && button.gameObject != null)
+                        if (button != null)
                         {
-#if UNITY_EDITOR
-                              if (!Application.isPlaying)
-                                    DestroyImmediate(button.gameObject);
-                              else
-                                    Destroy(button.gameObject);
-#else
                               Destroy(button.gameObject);
-#endif
                         }
                   }
                   colorButtons.Clear();
 
-                  // Создаем кнопки для каждого материала
-                  CreateColorButtons();
-
-                  // Выбираем первый цвет по умолчанию
-                  if (colorButtons.Count > 0)
-                  {
-                        SelectColor(0);
-                        Debug.Log($"SimplePaintColorSelector: инициализация завершена. Создано {colorButtons.Count} кнопок.");
-                  }
-                  else
-                  {
-                        Debug.LogWarning("SimplePaintColorSelector: не удалось создать кнопки для материалов.");
-                  }
-            }
-
-            /// <summary>
-            /// Создает кнопки для каждого материала краски
-            /// </summary>
-            private void CreateColorButtons()
-            {
-                  if (colorButtonsContainer == null || buttonPrefab == null)
-                  {
-                        Debug.LogError("Не задан контейнер для кнопок или префаб кнопки в SimplePaintColorSelector");
-                        return;
-                  }
-
-                  Debug.Log($"SimplePaintColorSelector: создание кнопок для {paintMaterials.Length} материалов");
-
+                  // Create new buttons
                   for (int i = 0; i < paintMaterials.Length; i++)
                   {
                         Material material = paintMaterials[i];
-                        if (material == null)
-                        {
-                              Debug.LogWarning($"Материал с индексом {i} равен null. Пропускаем создание кнопки.");
-                              continue;
-                        }
+                        if (material == null) continue;
 
-                        GameObject buttonObj = null;
-                        try
+                        GameObject buttonObj = Instantiate(colorButtonPrefab, colorButtonsContainer);
+                        Button button = buttonObj.GetComponent<Button>();
+
+                        if (button != null)
                         {
-#if UNITY_EDITOR
-                              if (!UnityEditor.EditorApplication.isPlaying)
+                              // Set button color
+                              Image buttonImage = button.GetComponent<Image>();
+                              if (buttonImage != null && material.HasProperty("_Color"))
                               {
-                                    // В режиме редактирования используем PrefabUtility
-                                    buttonObj = UnityEditor.PrefabUtility.InstantiatePrefab(buttonPrefab) as GameObject;
-                                    if (buttonObj != null)
-                                    {
-                                          buttonObj.transform.SetParent(colorButtonsContainer, false);
-                                    }
+                                    buttonImage.color = material.GetColor("_Color");
                               }
-                              else
-                              {
-                                    buttonObj = Instantiate(buttonPrefab, colorButtonsContainer);
-                              }
-#else
-                              buttonObj = Instantiate(buttonPrefab, colorButtonsContainer);
-#endif
-                        }
-                        catch (System.Exception e)
-                        {
-                              Debug.LogError($"Ошибка при создании кнопки: {e.Message}");
-                              continue;
-                        }
 
-                        if (buttonObj == null)
-                        {
-                              Debug.LogError("Не удалось создать кнопку. Объект равен null.");
-                              continue;
+                              // Add click listener
+                              int index = i;
+                              button.onClick.AddListener(() => SelectColor(index));
+                              colorButtons.Add(button);
                         }
+                  }
 
-                        SimpleColorButton colorButton = buttonObj.GetComponent<SimpleColorButton>();
-
-                        if (colorButton == null)
-                        {
-                              colorButton = buttonObj.AddComponent<SimpleColorButton>();
-                              Debug.Log($"Добавлен компонент SimpleColorButton к кнопке {i}");
-                        }
-
-                        // Настраиваем кнопку
-                        colorButton.Setup(material.color, i, SelectColor);
-                        colorButtons.Add(colorButton);
-                        Debug.Log($"Создана кнопка для материала {material.name} с цветом {material.color}");
+                  // Select first color
+                  if (colorButtons.Count > 0)
+                  {
+                        SelectColor(0);
                   }
             }
 
-            /// <summary>
-            /// Выбирает цвет по индексу
-            /// </summary>
-            /// <param name="colorIndex">Индекс цвета в массиве материалов</param>
-            public void SelectColor(int colorIndex)
+            private void SelectColor(int index)
             {
-                  if (colorIndex < 0 || colorIndex >= paintMaterials.Length)
+                  if (index < 0 || index >= paintMaterials.Length || wallPainter == null)
                         return;
 
-                  selectedColorIndex = colorIndex;
+                  selectedColorIndex = index;
 
-                  // Обновляем визуальное состояние кнопок
+                  // Update button visuals
                   for (int i = 0; i < colorButtons.Count; i++)
                   {
                         if (colorButtons[i] != null)
                         {
-                              // Здесь можно добавить визуальное выделение выбранной кнопки
-                              // например, изменить размер или добавить рамку
+                              colorButtons[i].transform.localScale = (i == selectedColorIndex)
+                                    ? new Vector3(1.2f, 1.2f, 1.2f)
+                                    : Vector3.one;
                         }
                   }
 
-                  // Сообщаем WallPainter о выбранном цвете
-                  if (wallPainter != null)
-                  {
-                        wallPainter.SelectPaintMaterial(colorIndex);
-                  }
+                  // Update WallPainter
+                  wallPainter.SelectPaintMaterial(index);
             }
 
-            /// <summary>
-            /// Сбрасывает все материалы стен к исходным
-            /// </summary>
             public void ResetWallColors()
             {
                   if (wallPainter != null)
                   {
                         wallPainter.ResetWallMaterials();
                   }
-            }
-
-            /// <summary>
-            /// Создает временный префаб кнопки для использования в селекторе цветов
-            /// </summary>
-            private GameObject CreateTemporaryButtonPrefab()
-            {
-                  GameObject buttonObj = new GameObject("ColorButtonPrefab");
-
-                  // Добавляем RectTransform
-                  RectTransform rectTransform = buttonObj.AddComponent<RectTransform>();
-                  rectTransform.sizeDelta = new Vector2(60, 60);
-
-                  // Добавляем Image
-                  Image image = buttonObj.AddComponent<Image>();
-                  image.color = Color.white;
-
-                  // Добавляем Button
-                  Button button = buttonObj.AddComponent<Button>();
-                  ColorBlock colors = button.colors;
-                  colors.highlightedColor = new Color(0.9f, 0.9f, 0.9f);
-                  colors.pressedColor = new Color(0.7f, 0.7f, 0.7f);
-                  button.colors = colors;
-
-                  // Добавляем SimpleColorButton
-                  SimpleColorButton colorButton = buttonObj.AddComponent<SimpleColorButton>();
-
-                  return buttonObj;
             }
       }
 }

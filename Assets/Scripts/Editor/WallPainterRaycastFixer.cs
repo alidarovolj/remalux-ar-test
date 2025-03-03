@@ -289,28 +289,21 @@ namespace Remalux.AR
                         }
 
                         // Обработка нажатия мыши
-                        if (Input.GetMouseButtonDown(0))
+                        if (UnityEngine.Input.GetMouseButtonDown(0))
                         {
-                              if (paintWallAtPositionMethod != null)
-                              {
-                                    // Исправление: конвертируем Vector3 в Vector2
-                                    Vector2 mousePos = new Vector2(Input.mousePosition.x, Input.mousePosition.y);
-                                    Debug.Log($"WallPainterRaycastEnhancer: вызов покраски стены в позиции {mousePos}");
-                                    paintWallAtPositionMethod.Invoke(wallPainter, new object[] { mousePos });
-                              }
+                              Vector2 mousePos = UnityEngine.Input.mousePosition;
+                              Debug.Log($"WallPainterRaycastEnhancer: вызов покраски стены в позиции {mousePos}");
+                              paintWallAtPositionMethod.Invoke(wallPainter, new object[] { mousePos });
                         }
 
                         // Обработка касаний (для мобильных устройств)
-                        if (Input.touchCount > 0)
+                        if (UnityEngine.Input.touchCount > 0)
                         {
-                              Touch touch = Input.GetTouch(0);
+                              Touch touch = UnityEngine.Input.GetTouch(0);
                               if (touch.phase == TouchPhase.Began)
                               {
-                                    if (paintWallAtPositionMethod != null)
-                                    {
-                                          Debug.Log($"WallPainterRaycastEnhancer: вызов покраски стены в позиции {touch.position}");
-                                          paintWallAtPositionMethod.Invoke(wallPainter, new object[] { touch.position });
-                                    }
+                                    Debug.Log($"WallPainterRaycastEnhancer: вызов покраски стены в позиции {touch.position}");
+                                    paintWallAtPositionMethod.Invoke(wallPainter, new object[] { touch.position });
                               }
                         }
                   }

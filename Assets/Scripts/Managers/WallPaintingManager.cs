@@ -19,6 +19,8 @@ namespace Remalux.AR
     /// </summary>
     public class WallPaintingManager : MonoBehaviour
     {
+        private static WallPaintingManager instance;
+
         [Header("References")]
         public WallPainter wallPainter;
         public MonoBehaviour colorSelector;
@@ -28,175 +30,149 @@ namespace Remalux.AR
         public Material[] paintMaterials;
         public Material defaultWallMaterial;
 
-        private void Awake()
+        /// <summary>
+        /// Возвращает подходящий шейдер в зависимости от используемого рендер пайплайна
+        /// </summary>
+        private Shader GetAppropriateShader()
         {
-            // Проверяем наличие материалов
-            if (paintMaterials == null || paintMaterials.Length == 0)
+            if (UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline != null)
             {
-                Debug.LogWarning("Не заданы материалы для покраски в WallPaintingManager. Система покраски может работать некорректно.");
-
-                // Попытка получить материалы из ColorManager
-                ColorManager colorManager = FindObjectOfType<ColorManager>();
-                if (colorManager != null)
-                {
-                    // Пытаемся получить материалы через рефлексию, так как метод GetAllMaterials не существует
-                    try
-                    {
-                        // Пытаемся получить материалы из свойства или поля
-                        var materialsField = colorManager.GetType().GetField("materials",
-                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-
-                        if (materialsField != null)
-                        {
-                            var materials = materialsField.GetValue(colorManager) as Material[];
-                            if (materials != null && materials.Length > 0)
-                            {
-                                paintMaterials = materials;
-                                Debug.Log($"WallPaintingManager: получено {paintMaterials.Length} материалов из ColorManager через рефлексию");
-                            }
-                        }
-                        else
-                        {
-                            // Пытаемся найти другие поля с материалами
-                            var allFields = colorManager.GetType().GetFields(
-                                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-
-                            foreach (var field in allFields)
-                            {
-                                if (field.FieldType == typeof(Material[]))
-                                {
-                                    var materials = field.GetValue(colorManager) as Material[];
-                                    if (materials != null && materials.Length > 0)
-                                    {
-                                        paintMaterials = materials;
-                                        Debug.Log($"WallPaintingManager: получено {paintMaterials.Length} материалов из ColorManager через поле {field.Name}");
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (System.Exception e)
-                    {
-                        Debug.LogError($"Ошибка при получении материалов из ColorManager: {e.Message}");
-                    }
-                }
-
-                // Если материалы все еще не получены, создаем стандартные
-                if (paintMaterials == null || paintMaterials.Length == 0)
-                {
-                    // Создаем хотя бы один материал, чтобы система не падала
-                    paintMaterials = new Material[1];
-                    paintMaterials[0] = new Material(Shader.Find("Standard"));
-                    paintMaterials[0].name = "DefaultPaint";
-                    paintMaterials[0].color = Color.white;
-                    Debug.Log("WallPaintingManager: создан стандартный материал для покраски");
-                }
+                // Для URP
+                Debug.Log("Используется URP, возвращаем URP шейдер");
+                return Shader.Find("Universal Render Pipeline/Lit");
             }
             else
             {
-                Debug.Log($"WallPaintingManager: загружено {paintMaterials.Length} материалов для покраски");
+                // Для стандартного рендер пайплайна
+                return Shader.Find("Standard");
+            }
+        }
+
+        private void Awake()
+        {
+            // Singleton pattern to prevent multiple instances
+            if (instance != null && instance != this)
+            {
+                Debug.LogWarning("Found duplicate WallPaintingManager. Destroying duplicate.");
+                Destroy(gameObject);
+                return;
+            }
+            instance = this;
+
+            // Load materials if not assigned
+            if (paintMaterials == null || paintMaterials.Length == 0)
+            {
+                LoadMaterialsFromColorManager();
+            }
+            else
+            {
+                Debug.Log($"WallPaintingManager: loaded {paintMaterials.Length} paint materials");
             }
 
-            // Проверяем наличие материала по умолчанию
-            if (defaultWallMaterial == null && paintMaterials.Length > 0)
+            // Check for default material
+            if (defaultWallMaterial == null && paintMaterials != null && paintMaterials.Length > 0)
             {
                 defaultWallMaterial = paintMaterials[0];
-                Debug.Log($"WallPaintingManager: установлен материал по умолчанию: {defaultWallMaterial.name}");
-            }
-            else if (defaultWallMaterial == null)
-            {
-                Debug.LogWarning("Не задан материал по умолчанию в WallPaintingManager. Система покраски может работать некорректно.");
+                Debug.Log($"WallPaintingManager: set default material: {defaultWallMaterial.name}");
             }
 
-            // Проверяем наличие WallPainter
+            // Find or create WallPainter
             if (wallPainter == null)
             {
                 wallPainter = FindObjectOfType<WallPainter>();
-                if (wallPainter != null)
+                if (wallPainter == null)
                 {
-                    Debug.Log("WallPaintingManager: найден WallPainter в сцене");
+                    GameObject wallPainterObj = new GameObject("WallPainter");
+                    wallPainter = wallPainterObj.AddComponent<WallPainter>();
+                    Debug.Log("WallPaintingManager: created new WallPainter");
                 }
                 else
                 {
-                    Debug.LogWarning("Не найден WallPainter в сцене. Система покраски не будет работать.");
-
-                    // Создаем WallPainter, если его нет
-                    GameObject wallPainterObj = new GameObject("WallPainter");
-                    wallPainter = wallPainterObj.AddComponent<WallPainter>();
-                    Debug.Log("WallPaintingManager: создан новый WallPainter");
+                    Debug.Log("WallPaintingManager: found existing WallPainter");
                 }
             }
 
-            // Проверяем наличие SimplePaintColorSelector
+            // Find or create SimplePaintColorSelector
             if (colorSelector == null)
             {
-                // Ищем объект по имени типа
                 var allMonoBehaviours = FindObjectsOfType<MonoBehaviour>();
-                foreach (var mb in allMonoBehaviours)
+                var colorSelectors = allMonoBehaviours.Where(mb => mb.GetType().Name == "SimplePaintColorSelector").ToList();
+
+                if (colorSelectors.Count > 0)
                 {
-                    if (mb.GetType().Name == "SimplePaintColorSelector")
+                    colorSelector = colorSelectors[0];
+                    Debug.Log("WallPaintingManager: found SimplePaintColorSelector in scene");
+
+                    // Clean up duplicates
+                    if (colorSelectors.Count > 1)
                     {
-                        colorSelector = mb;
-                        Debug.Log("WallPaintingManager: найден SimplePaintColorSelector в сцене");
-                        break;
+                        Debug.LogWarning($"Found {colorSelectors.Count} SimplePaintColorSelectors. Keeping only one instance.");
+                        for (int i = 1; i < colorSelectors.Count; i++)
+                        {
+                            Destroy(colorSelectors[i].gameObject);
+                        }
                     }
                 }
-
-                if (colorSelector == null)
+                else
                 {
-                    Debug.LogError("Не удалось найти SimplePaintColorSelector в сцене");
+                    Debug.LogWarning("Could not find SimplePaintColorSelector in scene");
                 }
             }
 
-            // Настраиваем связи между компонентами сразу в Awake
-            SetupComponents();
+            // Setup components with a delay to ensure proper initialization
+            StartCoroutine(DelayedInitialization());
         }
 
         private void SetupComponents()
         {
-            // Настраиваем WallPainter
-            if (wallPainter != null)
+            if (wallPainter == null || colorSelector == null)
             {
-                // Устанавливаем материал по умолчанию
-                var defaultMaterialField = wallPainter.GetType().GetField("defaultMaterial",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-                if (defaultMaterialField != null)
-                {
-                    defaultMaterialField.SetValue(wallPainter, defaultWallMaterial);
-                    Debug.Log($"WallPaintingManager: установлен материал по умолчанию для WallPainter: {(defaultWallMaterial != null ? defaultWallMaterial.name : "null")}");
-                }
-
-                // Устанавливаем доступные материалы
-                var availablePaintsField = wallPainter.GetType().GetField("availablePaints",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-                if (availablePaintsField != null)
-                {
-                    availablePaintsField.SetValue(wallPainter, paintMaterials);
-                    Debug.Log($"WallPaintingManager: установлено {paintMaterials.Length} материалов для WallPainter");
-                }
+                Debug.LogError("Cannot setup components: WallPainter or ColorSelector is missing");
+                return;
             }
 
-            // Настраиваем SimplePaintColorSelector
-            if (colorSelector != null)
+            // Setup WallPainter
+            var defaultMaterialField = wallPainter.GetType().GetField("defaultMaterial",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+            if (defaultMaterialField != null)
             {
-                // Устанавливаем ссылку на WallPainter через рефлексию
-                var wallPainterField = colorSelector.GetType().GetField("wallPainter",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-                if (wallPainterField != null)
-                {
-                    wallPainterField.SetValue(colorSelector, wallPainter);
-                    Debug.Log("WallPaintingManager: установлена ссылка на WallPainter для SimplePaintColorSelector");
-                }
+                defaultMaterialField.SetValue(wallPainter, defaultWallMaterial);
+                Debug.Log($"WallPaintingManager: set default material for WallPainter: {(defaultWallMaterial != null ? defaultWallMaterial.name : "null")}");
+            }
 
-                // Устанавливаем материалы через рефлексию
-                var paintMaterialsField = colorSelector.GetType().GetField("paintMaterials",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-                if (paintMaterialsField != null)
-                {
-                    paintMaterialsField.SetValue(colorSelector, paintMaterials);
-                    Debug.Log($"WallPaintingManager: установлено {paintMaterials.Length} материалов для SimplePaintColorSelector");
-                }
+            // Setup available paints
+            var availablePaintsField = wallPainter.GetType().GetField("availablePaints",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+            if (availablePaintsField != null && paintMaterials != null && paintMaterials.Length > 0)
+            {
+                availablePaintsField.SetValue(wallPainter, paintMaterials);
+                Debug.Log($"WallPaintingManager: set {paintMaterials.Length} materials for WallPainter");
+            }
+
+            // Setup SimplePaintColorSelector
+            var wallPainterField = colorSelector.GetType().GetField("wallPainter",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+            if (wallPainterField != null)
+            {
+                wallPainterField.SetValue(colorSelector, wallPainter);
+                Debug.Log("WallPaintingManager: set WallPainter reference for SimplePaintColorSelector");
+            }
+
+            var paintMaterialsField = colorSelector.GetType().GetField("paintMaterials",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+            if (paintMaterialsField != null && paintMaterials != null && paintMaterials.Length > 0)
+            {
+                paintMaterialsField.SetValue(colorSelector, paintMaterials);
+                Debug.Log($"WallPaintingManager: set {paintMaterials.Length} materials for SimplePaintColorSelector");
+            }
+
+            // Initialize the color selector
+            var initializeMethod = colorSelector.GetType().GetMethod("Initialize",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+            if (initializeMethod != null)
+            {
+                initializeMethod.Invoke(colorSelector, null);
+                Debug.Log("WallPaintingManager: initialized SimplePaintColorSelector");
             }
         }
 
@@ -381,28 +357,87 @@ namespace Remalux.AR
         // Перегрузка метода CreateWall для создания стены с заданными параметрами
         public void CreateWall(Vector3 position, Quaternion rotation, Vector3 scale, Color color)
         {
-            // Создаем новый объект стены
-            GameObject wallObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            wallObject.transform.position = position;
-            wallObject.transform.rotation = rotation;
-            wallObject.transform.localScale = scale;
+            GameObject wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            wall.transform.position = position;
+            wall.transform.rotation = rotation;
+            wall.transform.localScale = scale;
+            wall.tag = "Wall";
+            wall.layer = LayerMask.NameToLayer("Wall");
 
-            // Устанавливаем слой Wall
-            wallObject.layer = LayerMask.NameToLayer("Wall");
-
-            // Создаем материал с заданным цветом
-            Material material = new Material(Shader.Find("Standard"));
+            // Создаем материал
+            Material material = new Material(GetAppropriateShader());
             material.color = color;
 
             // Применяем материал
-            Renderer renderer = wallObject.GetComponent<Renderer>();
+            Renderer renderer = wall.GetComponent<Renderer>();
             if (renderer != null)
             {
                 renderer.material = material;
             }
 
             // Добавляем стену в WallPainter
-            CreateWall(wallObject);
+            CreateWall(wall);
+        }
+
+        private void LoadMaterialsFromColorManager()
+        {
+            // Try to get materials from ColorManager
+            ColorManager colorManager = FindObjectOfType<ColorManager>();
+            if (colorManager != null)
+            {
+                // Пытаемся получить материалы через рефлексию, так как метод GetAllMaterials не существует
+                try
+                {
+                    // Пытаемся получить материалы из свойства или поля
+                    var materialsField = colorManager.GetType().GetField("materials",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+
+                    if (materialsField != null)
+                    {
+                        var materials = materialsField.GetValue(colorManager) as Material[];
+                        if (materials != null && materials.Length > 0)
+                        {
+                            paintMaterials = materials;
+                            Debug.Log($"WallPaintingManager: получено {paintMaterials.Length} материалов из ColorManager через рефлексию");
+                        }
+                    }
+                    else
+                    {
+                        // Пытаемся найти другие поля с материалами
+                        var allFields = colorManager.GetType().GetFields(
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+
+                        foreach (var field in allFields)
+                        {
+                            if (field.FieldType == typeof(Material[]))
+                            {
+                                var materials = field.GetValue(colorManager) as Material[];
+                                if (materials != null && materials.Length > 0)
+                                {
+                                    paintMaterials = materials;
+                                    Debug.Log($"WallPaintingManager: получено {paintMaterials.Length} материалов из ColorManager через поле {field.Name}");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Ошибка при получении материалов из ColorManager: {e.Message}");
+                }
+            }
+
+            // Если материалы все еще не получены, создаем стандартные
+            if (paintMaterials == null || paintMaterials.Length == 0)
+            {
+                // Создаем хотя бы один материал, чтобы система не падала
+                paintMaterials = new Material[1];
+                paintMaterials[0] = new Material(GetAppropriateShader());
+                paintMaterials[0].name = "DefaultPaint";
+                paintMaterials[0].color = Color.white;
+                Debug.Log("WallPaintingManager: создан стандартный материал для покраски");
+            }
         }
     }
 }

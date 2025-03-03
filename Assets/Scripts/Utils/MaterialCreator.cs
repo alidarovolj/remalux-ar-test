@@ -7,15 +7,15 @@ using UnityEditor;
 
 namespace Remalux.AR
 {
-      /// <summary>
-      /// Утилита для создания базовых материалов для покраски стен
-      /// </summary>
-      public class MaterialCreator : MonoBehaviour
-      {
-            [Header("Настройки материалов")]
-            [SerializeField]
-            private Color[] colors = new Color[]
-            {
+    /// <summary>
+    /// Утилита для создания базовых материалов для покраски стен
+    /// </summary>
+    public class MaterialCreator : MonoBehaviour
+    {
+        [Header("Настройки материалов")]
+        [SerializeField]
+        private Color[] colors = new Color[]
+        {
             new Color(0.9f, 0.1f, 0.1f), // Красный
             new Color(0.1f, 0.6f, 0.9f), // Синий
             new Color(0.1f, 0.8f, 0.2f), // Зеленый
@@ -25,11 +25,11 @@ namespace Remalux.AR
             new Color(0.5f, 0.3f, 0.1f), // Коричневый
             new Color(0.9f, 0.9f, 0.9f), // Белый
             new Color(0.3f, 0.3f, 0.3f)  // Серый
-            };
+        };
 
-            [SerializeField]
-            private string[] materialNames = new string[]
-            {
+        [SerializeField]
+        private string[] materialNames = new string[]
+        {
             "RedPaint",
             "BluePaint",
             "GreenPaint",
@@ -39,13 +39,31 @@ namespace Remalux.AR
             "BrownPaint",
             "WhitePaint",
             "GreyPaint"
-            };
+        };
 
-            [SerializeField] private string outputFolder = "Assets/Materials/Paints";
-            [SerializeField] private string defaultMaterialName = "DefaultWallMaterial";
-            [SerializeField] private Color defaultColor = new Color(0.9f, 0.9f, 0.9f);
+        [SerializeField] private string outputFolder = "Assets/Materials/Paints";
+        [SerializeField] private string defaultMaterialName = "DefaultWallMaterial";
+        [SerializeField] private Color defaultColor = new Color(0.9f, 0.9f, 0.9f);
 
 #if UNITY_EDITOR
+        /// <summary>
+        /// Возвращает подходящий шейдер в зависимости от используемого рендер пайплайна
+        /// </summary>
+        private Shader GetAppropriateShader()
+        {
+            if (UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline != null)
+            {
+                // Для URP
+                Debug.Log("Используется URP, возвращаем URP шейдер");
+                return Shader.Find("Universal Render Pipeline/Lit");
+            }
+            else
+            {
+                // Для стандартного рендер пайплайна
+                return Shader.Find("Standard");
+            }
+        }
+
         /// <summary>
         /// Создает все материалы для покраски стен
         /// </summary>
@@ -96,7 +114,7 @@ namespace Remalux.AR
             }
 
             // Создаем новый материал
-            Material material = new Material(Shader.Find("Standard"));
+            Material material = new Material(GetAppropriateShader());
             material.color = defaultColor;
             
             // Настраиваем свойства материала
@@ -129,7 +147,7 @@ namespace Remalux.AR
             }
 
             // Создаем новый материал
-            Material material = new Material(Shader.Find("Standard"));
+            Material material = new Material(GetAppropriateShader());
             material.color = color;
             
             // Настраиваем свойства материала
@@ -141,7 +159,7 @@ namespace Remalux.AR
             Debug.Log($"Создан материал: {path}");
         }
 #endif
-      }
+    }
 
 #if UNITY_EDITOR
     /// <summary>

@@ -205,47 +205,13 @@ namespace Remalux.AR
 
             private void Update()
             {
-                  if (!enableDirectMaterialApplication || wallPainter == null)
-                        return;
+                  if (wallPainter == null || paintWallAtPositionMethod == null) return;
 
-                  // Обработка нажатия мыши
-                  if (Input.GetMouseButtonDown(0))
+                  // Use UnityEngine.Input directly
+                  if (UnityEngine.Input.GetMouseButtonDown(0))
                   {
-                        Vector2 mousePos = new Vector2(Input.mousePosition.x, Input.mousePosition.y);
-
-                        // Выполняем рейкаст для поиска стены
-                        Camera mainCamera = Camera.main;
-                        if (mainCamera != null)
-                        {
-                              Ray ray = mainCamera.ScreenPointToRay(mousePos);
-                              RaycastHit hit;
-                              int wallLayer = 8; // Слой "Wall"
-                              bool didHit = Physics.Raycast(ray, out hit, 100f, 1 << wallLayer);
-
-                              if (didHit && showDebugInfo)
-                              {
-                                    Debug.Log($"WallPainterMaterialEnhancer: попадание в объект {hit.collider.gameObject.name}");
-
-                                    // Получаем текущий материал
-                                    Material currentMaterial = null;
-                                    if (currentPaintMaterialField != null)
-                                    {
-                                          currentMaterial = (Material)currentPaintMaterialField.GetValue(wallPainter);
-                                    }
-
-                                    // Применяем материал напрямую
-                                    if (currentMaterial != null)
-                                    {
-                                          Renderer renderer = hit.collider.GetComponent<Renderer>();
-                                          if (renderer != null)
-                                          {
-                                                Material originalMaterial = renderer.material;
-                                                renderer.material = currentMaterial;
-                                                Debug.Log($"WallPainterMaterialEnhancer: материал напрямую изменен на {currentMaterial.name}");
-                                          }
-                                    }
-                              }
-                        }
+                        Vector2 mousePos = UnityEngine.Input.mousePosition;
+                        paintWallAtPositionMethod.Invoke(wallPainter, new object[] { mousePos });
                   }
             }
       }

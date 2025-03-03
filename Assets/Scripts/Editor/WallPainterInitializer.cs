@@ -6,6 +6,24 @@ namespace Remalux.AR
 {
       public static class WallPainterInitializer
       {
+            /// <summary>
+            /// Возвращает подходящий шейдер в зависимости от используемого рендер пайплайна
+            /// </summary>
+            private static Shader GetAppropriateShader()
+            {
+                  if (UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline != null)
+                  {
+                        // Для URP
+                        Debug.Log("Используется URP, возвращаем URP шейдер");
+                        return Shader.Find("Universal Render Pipeline/Lit");
+                  }
+                  else
+                  {
+                        // Для стандартного рендер пайплайна
+                        return Shader.Find("Standard");
+                  }
+            }
+
             [MenuItem("Tools/Wall Painting/Fix/Initialize WallPainter")]
             public static void InitializeWallPainters()
             {
@@ -73,7 +91,7 @@ namespace Remalux.AR
                         if (defaultMaterial == null)
                         {
                               // Создаем стандартный материал
-                              Material newDefaultMaterial = new Material(Shader.Find("Standard"));
+                              Material newDefaultMaterial = new Material(GetAppropriateShader());
                               newDefaultMaterial.color = Color.white;
                               newDefaultMaterial.name = "DefaultWallMaterial";
 

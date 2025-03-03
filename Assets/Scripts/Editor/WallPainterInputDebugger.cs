@@ -280,10 +280,11 @@ namespace Remalux.AR
       {
             private void Update()
             {
-                  // Симулируем касание при нажатии левой кнопки мыши
-                  if (Input.GetMouseButtonDown(0))
+                  // Use UnityEngine.Input directly
+                  if (UnityEngine.Input.GetMouseButtonDown(0))
                   {
-                        Debug.Log($"Симуляция касания в позиции: {Input.mousePosition}");
+                        Vector2 mousePos = UnityEngine.Input.mousePosition;
+                        Debug.Log($"TouchSimulator: Simulating touch at {mousePos}");
                   }
             }
       }
@@ -293,19 +294,19 @@ namespace Remalux.AR
       {
             private void Update()
             {
-                  // Логируем нажатия мыши
-                  if (Input.GetMouseButtonDown(0))
+                  // Use UnityEngine.Input directly
+                  if (UnityEngine.Input.GetMouseButtonDown(0))
                   {
-                        Debug.Log($"Нажатие левой кнопки мыши в позиции: {Input.mousePosition}");
+                        Vector2 mousePos = UnityEngine.Input.mousePosition;
+                        Debug.Log($"InputLogger: Mouse click at {mousePos}");
                   }
 
-                  // Логируем касания (для мобильных устройств)
-                  if (Input.touchCount > 0)
+                  if (UnityEngine.Input.touchCount > 0)
                   {
-                        Touch touch = Input.GetTouch(0);
+                        Touch touch = UnityEngine.Input.GetTouch(0);
                         if (touch.phase == TouchPhase.Began)
                         {
-                              Debug.Log($"Начало касания в позиции: {touch.position}");
+                              Debug.Log($"InputLogger: Touch at {touch.position}");
                         }
                   }
             }
@@ -320,31 +321,25 @@ namespace Remalux.AR
             public void SetWallPainter(MonoBehaviour wp)
             {
                   wallPainter = wp;
-                  if (wallPainter != null)
-                  {
-                        paintWallAtPositionMethod = wallPainter.GetType().GetMethod("PaintWallAtPosition");
-                  }
+                  paintWallAtPositionMethod = wallPainter?.GetType().GetMethod("PaintWallAtPosition");
             }
 
             private void Update()
             {
-                  if (wallPainter == null || paintWallAtPositionMethod == null)
-                        return;
+                  if (wallPainter == null || paintWallAtPositionMethod == null) return;
 
-                  // Обработка мыши
-                  if (Input.GetMouseButtonDown(0))
+                  // Use UnityEngine.Input directly
+                  if (UnityEngine.Input.GetMouseButtonDown(0))
                   {
-                        Debug.Log($"WallPainterInputHandler: Обработка нажатия мыши в позиции {Input.mousePosition}");
-                        paintWallAtPositionMethod.Invoke(wallPainter, new object[] { Input.mousePosition });
+                        Vector2 mousePos = UnityEngine.Input.mousePosition;
+                        paintWallAtPositionMethod.Invoke(wallPainter, new object[] { mousePos });
                   }
 
-                  // Обработка касаний (для мобильных устройств)
-                  if (Input.touchCount > 0)
+                  if (UnityEngine.Input.touchCount > 0)
                   {
-                        Touch touch = Input.GetTouch(0);
+                        Touch touch = UnityEngine.Input.GetTouch(0);
                         if (touch.phase == TouchPhase.Began)
                         {
-                              Debug.Log($"WallPainterInputHandler: Обработка касания в позиции {touch.position}");
                               paintWallAtPositionMethod.Invoke(wallPainter, new object[] { touch.position });
                         }
                   }

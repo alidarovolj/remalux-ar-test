@@ -192,7 +192,7 @@ namespace Remalux.AR
 
                                           // Добавляем компонент для отслеживания
                                           tracker = obj.AddComponent<WallMaterialInstanceTracker>();
-                                          tracker.originalSharedMaterial = renderer.sharedMaterial;
+                                          tracker.OriginalSharedMaterial = renderer.sharedMaterial;
                                           tracker.instancedMaterial = instancedMaterial;
                                     }
 
@@ -270,7 +270,7 @@ namespace Remalux.AR
                                           if (tracker == null)
                                           {
                                                 tracker = obj.AddComponent<WallMaterialInstanceTracker>();
-                                                tracker.originalSharedMaterial = sharedMaterial;
+                                                tracker.OriginalSharedMaterial = sharedMaterial;
                                                 tracker.instancedMaterial = instancedMaterial;
                                           }
 
@@ -361,7 +361,7 @@ namespace Remalux.AR
 
                                           // Добавляем компонент для отслеживания
                                           tracker = hit.collider.gameObject.AddComponent<WallMaterialInstanceTracker>();
-                                          tracker.originalSharedMaterial = renderer.sharedMaterial;
+                                          tracker.OriginalSharedMaterial = renderer.sharedMaterial;
                                           tracker.instancedMaterial = instancedMaterial;
                                     }
 
@@ -432,7 +432,7 @@ namespace Remalux.AR
 
                                           // Добавляем компонент для отслеживания
                                           tracker = hit.collider.gameObject.AddComponent<WallMaterialInstanceTracker>();
-                                          tracker.originalSharedMaterial = renderer.sharedMaterial;
+                                          tracker.OriginalSharedMaterial = renderer.sharedMaterial;
                                           tracker.instancedMaterial = instancedMaterial;
                                     }
 

@@ -1,19 +1,20 @@
 using UnityEngine;
 using System.Collections.Generic;
+using Remalux.AR.Input;
 
 namespace Remalux.AR
 {
       public class WallPainter : MonoBehaviour
       {
-            [Header("Настройки покраски")]
-            public Material[] availablePaints;
-            public Material defaultMaterial;
-            public Camera mainCamera;
-            public LayerMask wallLayerMask;
+            [Header("Paint Settings")]
+            [SerializeField] public Material[] availablePaints;
+            [SerializeField] public Material defaultMaterial;
+            [SerializeField] public Camera mainCamera;
+            [SerializeField] public LayerMask wallLayerMask;
 
-            [Header("Настройки визуализации")]
-            public bool showColorPreview = true;
-            public GameObject colorPreviewPrefab;
+            [Header("Preview Settings")]
+            [SerializeField] public bool showColorPreview = true;
+            [SerializeField] public GameObject colorPreviewPrefab;
 
             // Список стен для покраски
             private List<GameObject> walls = new List<GameObject>();
@@ -28,116 +29,220 @@ namespace Remalux.AR
             private GameObject colorPreview;
             private SimpleColorPreview previewComponent;
 
+            // Flag to control input handling
+            private bool handleInputInternally = false;
+            private bool _isInitialized = false;
+
+            /// <summary>
+            /// Gets whether the WallPainter is initialized
+            /// </summary>
+            public bool IsInitialized => _isInitialized;
+
+            private void Awake()
+            {
+                  // Initialize in Awake to ensure it's ready before other components
+                  if (!_isInitialized)
+                  {
+                        Initialize();
+                  }
+            }
+
             private void Start()
             {
+                  // Ensure initialization in Start if not done in Awake
+                  if (!_isInitialized)
+                  {
+                        Initialize();
+                  }
+
+                  // Check for input handlers and resolve conflicts
+                  var enhancedInput = GetComponent<EnhancedWallPainterInput>();
+                  var directInput = GetComponent<DirectInputHandler>();
+
+                  if (enhancedInput != null && directInput != null)
+                  {
+                        Debug.LogWarning("Multiple input handlers detected. Disabling DirectInputHandler.");
+                        directInput.enabled = false;
+                        Destroy(directInput);
+                        handleInputInternally = false;
+                  }
+                  else if (enhancedInput != null)
+                  {
+                        Debug.Log("Using EnhancedWallPainterInput for input handling");
+                        handleInputInternally = false;
+                  }
+                  else if (directInput != null)
+                  {
+                        Debug.Log("Using DirectInputHandler for input handling");
+                        handleInputInternally = false;
+                  }
+                  else
+                  {
+                        Debug.Log("No external input handlers found. Using internal input handling.");
+                        handleInputInternally = true;
+                  }
+            }
+
+            private void OnEnable()
+            {
+                  // Re-check input handlers when component is enabled
+                  var enhancedInput = GetComponent<EnhancedWallPainterInput>();
+                  var directInput = GetComponent<DirectInputHandler>();
+
+                  if (enhancedInput != null && directInput != null)
+                  {
+                        directInput.enabled = false;
+                        Destroy(directInput);
+                        handleInputInternally = false;
+                  }
+                  else if (enhancedInput != null || directInput != null)
+                  {
+                        handleInputInternally = false;
+                  }
+                  else
+                  {
+                        handleInputInternally = true;
+                  }
+            }
+
+            private void OnDisable()
+            {
+                  // Disable input handling when component is disabled
+                  handleInputInternally = false;
+            }
+
+            /// <summary>
+            /// Возвращает подходящий шейдер в зависимости от используемого рендер пайплайна
+            /// </summary>
+            private Shader GetAppropriateShader()
+            {
+                  if (UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline != null)
+                  {
+                        // Для URP
+                        Debug.Log("Используется URP, возвращаем URP шейдер");
+                        return Shader.Find("Universal Render Pipeline/Lit");
+                  }
+                  else
+                  {
+                        // Для стандартного рендер пайплайна
+                        return Shader.Find("Standard");
+                  }
+            }
+
+            public void Initialize()
+            {
+                  // Initialize camera
                   if (mainCamera == null)
                   {
                         mainCamera = Camera.main;
                         if (mainCamera == null)
                         {
-                              Debug.LogWarning("Не найдена основная камера. Система покраски может работать некорректно.");
+                              Debug.LogError("WallPainter: No camera found!");
+                              return;
                         }
                   }
 
-                  // Проверяем наличие материалов
-                  if (availablePaints == null || availablePaints.Length == 0)
+                  // Initialize wall layer mask
+                  if (wallLayerMask == 0)
                   {
-                        Debug.LogWarning("Не заданы материалы для покраски в WallPainter. Система покраски не будет работать корректно.");
-
-                        // Пытаемся получить материалы из WallPaintingManager
-                        WallPaintingManager manager = FindObjectOfType<WallPaintingManager>();
-                        if (manager != null && manager.paintMaterials != null && manager.paintMaterials.Length > 0)
+                        int wallLayer = LayerMask.NameToLayer("Wall");
+                        if (wallLayer != -1)
                         {
-                              Debug.Log($"WallPainter: получено {manager.paintMaterials.Length} материалов из WallPaintingManager");
-                              availablePaints = manager.paintMaterials;
+                              wallLayerMask = 1 << wallLayer;
+                              Debug.Log($"WallPainter: Set wall layer mask: {wallLayerMask.value}");
                         }
                         else
                         {
-                              // Создаем пустой массив, чтобы избежать NullReferenceException
-                              availablePaints = new Material[0];
+                              Debug.LogError("WallPainter: 'Wall' layer not found!");
+                              return;
                         }
                   }
-                  else
+
+                  // Initialize paint materials
+                  if (availablePaints == null || availablePaints.Length == 0)
                   {
-                        Debug.Log($"WallPainter: доступно {availablePaints.Length} материалов для покраски");
+                        Debug.LogWarning("WallPainter: No paint materials assigned, attempting to get from WallPaintingManager");
+                        var manager = FindObjectOfType<WallPaintingManager>();
+                        if (manager != null && manager.paintMaterials != null && manager.paintMaterials.Length > 0)
+                        {
+                              availablePaints = manager.paintMaterials;
+                              Debug.Log($"WallPainter: Got {availablePaints.Length} materials from WallPaintingManager");
+                        }
+                        else
+                        {
+                              Debug.LogError("WallPainter: No paint materials available!");
+                              return;
+                        }
                   }
 
-                  // Проверяем наличие материала по умолчанию
-                  if (defaultMaterial == null && availablePaints.Length > 0)
+                  // Initialize default material
+                  if (defaultMaterial == null)
                   {
-                        defaultMaterial = availablePaints[0];
-                        Debug.Log($"WallPainter: установлен материал по умолчанию: {defaultMaterial.name}");
-                  }
-                  else if (defaultMaterial == null)
-                  {
-                        Debug.LogWarning("Не задан материал для покраски по умолчанию и нет доступных материалов. Система покраски не будет работать корректно.");
-
-                        // Создаем стандартный материал, чтобы избежать ошибок
-                        defaultMaterial = new Material(Shader.Find("Standard"));
-                        defaultMaterial.name = "DefaultMaterial";
-                        defaultMaterial.color = Color.white;
-                        Debug.Log("WallPainter: создан стандартный материал по умолчанию");
+                        if (availablePaints.Length > 0)
+                        {
+                              defaultMaterial = availablePaints[0];
+                              Debug.Log($"WallPainter: Using first paint as default: {defaultMaterial.name}");
+                        }
+                        else
+                        {
+                              Debug.LogError("WallPainter: No default material and no available paints!");
+                              return;
+                        }
                   }
 
-                  // Устанавливаем текущий материал
+                  // Initialize current paint material
                   currentPaintMaterial = defaultMaterial;
-                  Debug.Log($"WallPainter: текущий материал для покраски: {currentPaintMaterial.name}");
+                  Debug.Log($"WallPainter: Current paint material set to: {currentPaintMaterial.name}");
 
-                  // Настраиваем превью цвета
-                  if (showColorPreview && colorPreviewPrefab != null)
+                  // Initialize color preview
+                  if (showColorPreview)
                   {
-                        colorPreview = Instantiate(colorPreviewPrefab);
+                        if (colorPreviewPrefab != null)
+                        {
+                              colorPreview = Instantiate(colorPreviewPrefab);
+                        }
+                        else
+                        {
+                              colorPreview = CreateColorPreviewObject();
+                        }
+
                         previewComponent = colorPreview.GetComponent<SimpleColorPreview>();
                         if (previewComponent == null)
                         {
                               previewComponent = colorPreview.AddComponent<SimpleColorPreview>();
                         }
                         colorPreview.SetActive(false);
-                        Debug.Log("WallPainter: создан объект предпросмотра цвета");
+                        Debug.Log("WallPainter: Color preview initialized");
                   }
-                  else if (showColorPreview)
-                  {
-                        // Создаем простой превью, если префаб не задан
-                        colorPreview = CreateColorPreviewObject();
-                        previewComponent = colorPreview.AddComponent<SimpleColorPreview>();
-                        colorPreview.SetActive(false);
-                        Debug.Log("WallPainter: создан стандартный объект предпросмотра цвета");
-                  }
+
+                  _isInitialized = true;
+                  Debug.Log("WallPainter: Initialization complete");
             }
 
             private void Update()
             {
-                  HandleInput();
-                  if (colorPreview != null)
-                  {
-                        UpdateColorPreview();
-                  }
-            }
+                  if (!_isInitialized) return;
 
-            private void HandleInput()
-            {
-                  // Обработка касания/клика для покраски стены
-                  if (Input.GetMouseButtonDown(0))
+                  // Only handle input internally if no external handlers exist
+                  if (handleInputInternally && UnityEngine.Input.GetMouseButtonDown(0))
                   {
-                        PaintWallAtPosition(Input.mousePosition);
+                        PaintWallAtPosition(UnityEngine.Input.mousePosition);
                   }
+
+                  UpdateColorPreview();
             }
 
             private void UpdateColorPreview()
             {
-                  if (colorPreview == null) return;
-                  if (mainCamera == null) return;
+                  if (!showColorPreview || colorPreview == null || mainCamera == null) return;
 
-                  Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
-                  RaycastHit hit;
-
-                  if (Physics.Raycast(ray, out hit, 100f, wallLayerMask))
+                  Ray ray = mainCamera.ScreenPointToRay(UnityEngine.Input.mousePosition);
+                  if (Physics.Raycast(ray, out RaycastHit hit, 100f, wallLayerMask))
                   {
                         colorPreview.SetActive(true);
                         colorPreview.transform.position = hit.point + hit.normal * 0.01f;
                         colorPreview.transform.forward = hit.normal;
 
-                        // Устанавливаем текущий материал на превью
                         if (previewComponent != null && currentPaintMaterial != null)
                         {
                               previewComponent.SetMaterial(currentPaintMaterial);
@@ -151,106 +256,132 @@ namespace Remalux.AR
 
             public void PaintWallAtPosition(Vector2 screenPosition)
             {
+                  if (!_isInitialized)
+                  {
+                        Debug.LogError("WallPainter: Not initialized!");
+                        return;
+                  }
+
                   if (currentPaintMaterial == null)
+                  {
+                        Debug.LogError("WallPainter: No paint material selected!");
                         return;
-                  if (mainCamera == null)
-                        return;
+                  }
 
                   Ray ray = mainCamera.ScreenPointToRay(screenPosition);
-                  RaycastHit hit;
+                  Debug.Log($"WallPainter: Casting ray from {ray.origin} in direction {ray.direction}");
 
-                  if (Physics.Raycast(ray, out hit, 100f, wallLayerMask))
+                  if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, wallLayerMask))
                   {
-                        GameObject wallObject = hit.collider.gameObject;
+                        Debug.Log($"WallPainter: Hit object {hit.collider.gameObject.name} at point {hit.point}");
+                        var wallObject = hit.collider.gameObject;
+                        var wallRenderer = wallObject.GetComponent<Renderer>();
 
-                        // Сохраняем оригинальный материал, если еще не сохранен
-                        if (!originalMaterials.ContainsKey(wallObject))
+                        if (!wallRenderer)
                         {
-                              Renderer renderer = wallObject.GetComponent<Renderer>();
-                              if (renderer != null)
-                              {
-                                    originalMaterials[wallObject] = renderer.material;
-                              }
+                              Debug.LogError($"WallPainter: No Renderer on {wallObject.name}");
+                              return;
                         }
 
-                        // Применяем новый материал
-                        Renderer wallRenderer = wallObject.GetComponent<Renderer>();
-                        if (wallRenderer != null)
+                        // Get or add WallMaterialInstanceTracker
+                        var tracker = wallObject.GetComponent<WallMaterialInstanceTracker>();
+                        if (tracker == null)
                         {
-                              wallRenderer.material = currentPaintMaterial;
+                              tracker = wallObject.AddComponent<WallMaterialInstanceTracker>();
+                              tracker.OriginalSharedMaterial = wallRenderer.sharedMaterial;
+                              Debug.Log($"WallPainter: Added WallMaterialInstanceTracker to {wallObject.name}");
                         }
 
-                        Debug.Log($"Стена покрашена материалом: {currentPaintMaterial.name}");
+                        // Apply material through the tracker
+                        tracker.ApplyMaterial(currentPaintMaterial);
+                        Debug.Log($"WallPainter: Applied {currentPaintMaterial.name} to {wallObject.name} through tracker");
+
+                        // Track painted wall
+                        if (!walls.Contains(wallObject))
+                        {
+                              walls.Add(wallObject);
+                        }
+                  }
+                  else
+                  {
+                        Debug.Log("WallPainter: Ray did not hit any wall");
                   }
             }
 
             public void SelectPaintMaterial(int index)
             {
-                  // Проверяем наличие материалов
-                  if (availablePaints == null || availablePaints.Length == 0)
+                  if (!_isInitialized)
                   {
-                        Debug.LogWarning("Не заданы материалы для покраски в WallPainter. Невозможно выбрать материал.");
+                        Debug.LogError("WallPainter: Not initialized!");
                         return;
                   }
 
-                  if (index >= 0 && index < availablePaints.Length)
+                  if (availablePaints == null || availablePaints.Length == 0)
                   {
-                        Material selectedMaterial = availablePaints[index];
-                        if (selectedMaterial != null)
-                        {
-                              currentPaintMaterial = selectedMaterial;
-                              Debug.Log($"Выбран материал: {currentPaintMaterial.name}");
+                        Debug.LogError("WallPainter: No paint materials available!");
+                        return;
+                  }
 
-                              // Обновляем превью, если оно активно
-                              if (colorPreview != null && previewComponent != null && colorPreview.activeSelf)
-                              {
-                                    previewComponent.SetMaterial(currentPaintMaterial);
-                              }
-                        }
-                        else
+                  if (index < 0 || index >= availablePaints.Length)
+                  {
+                        Debug.LogError($"WallPainter: Invalid material index {index}!");
+                        return;
+                  }
+
+                  Material selectedMaterial = availablePaints[index];
+                  if (selectedMaterial != null)
+                  {
+                        currentPaintMaterial = selectedMaterial;
+                        Debug.Log($"WallPainter: Selected material: {currentPaintMaterial.name}");
+
+                        // Update preview if active
+                        if (colorPreview != null && previewComponent != null && colorPreview.activeSelf)
                         {
-                              Debug.LogWarning($"Материал с индексом {index} равен null.");
+                              previewComponent.SetMaterial(currentPaintMaterial);
                         }
                   }
                   else
                   {
-                        Debug.LogWarning($"Индекс материала {index} выходит за пределы доступных материалов (0-{availablePaints.Length - 1}).");
+                        Debug.LogError($"WallPainter: Material at index {index} is null!");
                   }
             }
 
             public void ResetWallMaterials()
             {
-                  foreach (var kvp in originalMaterials)
-                  {
-                        GameObject wallObject = kvp.Key;
-                        Material originalMaterial = kvp.Value;
+                  if (!_isInitialized) return;
 
-                        if (wallObject != null)
+                  foreach (var wall in walls)
+                  {
+                        if (wall != null)
                         {
-                              Renderer renderer = wallObject.GetComponent<Renderer>();
-                              if (renderer != null)
+                              var renderer = wall.GetComponent<Renderer>();
+                              if (renderer != null && originalMaterials.ContainsKey(wall))
                               {
-                                    renderer.material = originalMaterial;
+                                    renderer.material = new Material(originalMaterials[wall]);
+                                    Debug.Log($"WallPainter: Reset material for {wall.name}");
                               }
                         }
                   }
 
+                  walls.Clear();
                   originalMaterials.Clear();
-                  Debug.Log("Все материалы стен сброшены к исходным");
+                  Debug.Log("WallPainter: All walls reset to original materials");
+            }
+
+            public Material GetCurrentPaintMaterial()
+            {
+                  return currentPaintMaterial;
             }
 
             // Метод для создания простого объекта превью цвета
             private GameObject CreateColorPreviewObject()
             {
                   GameObject previewObject = new GameObject("ColorPreview");
-
-                  // Добавляем компоненты для отображения
                   MeshFilter meshFilter = previewObject.AddComponent<MeshFilter>();
                   MeshRenderer renderer = previewObject.AddComponent<MeshRenderer>();
 
-                  // Создаем простой круглый меш для превью
+                  // Create preview mesh
                   Mesh mesh = new Mesh();
-
                   int segments = 32;
                   float radius = 0.1f;
 
@@ -262,7 +393,6 @@ namespace Remalux.AR
                   uvs[0] = new Vector2(0.5f, 0.5f);
 
                   float angleStep = 360f / segments;
-
                   for (int i = 0; i < segments; i++)
                   {
                         float angle = angleStep * i * Mathf.Deg2Rad;
@@ -283,10 +413,10 @@ namespace Remalux.AR
                   mesh.RecalculateNormals();
 
                   meshFilter.mesh = mesh;
-
-                  // Устанавливаем материал
-                  if (defaultMaterial != null)
-                        renderer.material = defaultMaterial;
+                  renderer.material = new Material(Shader.Find("Universal Render Pipeline/Lit"))
+                  {
+                        color = Color.white
+                  };
 
                   return previewObject;
             }
