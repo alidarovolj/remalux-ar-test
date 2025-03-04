@@ -723,7 +723,7 @@ namespace Remalux.AR
                               text.text = "Сброс";
                               text.alignment = TextAnchor.MiddleCenter;
                               text.color = Color.black;
-                              text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+                              text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                         }
                         else
                         {
