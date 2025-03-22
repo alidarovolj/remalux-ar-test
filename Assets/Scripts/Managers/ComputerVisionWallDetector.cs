@@ -96,7 +96,6 @@ namespace Remalux.AR
         [SerializeField] private ImageProcessingSettings imageProcessingSettings = new ImageProcessingSettings();
 
         [SerializeField] private WallSegmentationSettings settings = new WallSegmentationSettings();
-        [SerializeField] private bool showDebugInfo = true;
         [SerializeField] private WallPaintingManager wallPaintingManager;
 
         // Компоненты обработки
