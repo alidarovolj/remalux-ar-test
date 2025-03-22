@@ -1,3 +1,4 @@
+#if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
 using System.Reflection;
@@ -22,17 +23,32 @@ namespace Remalux.AR
 
             private void OnEnable()
             {
-                  targetComponent = (MonoBehaviour)target;
-                  isWallPainter = targetComponent.GetType().Name == "WallPainter";
+                  if (target == null) return;
 
-                  if (isWallPainter)
+                  try
                   {
-                        // Получаем доступ к полям и методам через рефлексию
-                        mainCameraField = targetComponent.GetType().GetField("mainCamera");
-                        wallLayerMaskField = targetComponent.GetType().GetField("wallLayerMask");
-                        currentPaintMaterialField = targetComponent.GetType().GetField("currentPaintMaterial",
-                            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                        paintWallAtPositionMethod = targetComponent.GetType().GetMethod("PaintWallAtPosition");
+                        targetComponent = target as MonoBehaviour;
+                        if (targetComponent == null)
+                        {
+                              Debug.LogError("WallPainterInputDebugger: Target is not a MonoBehaviour");
+                              return;
+                        }
+
+                        isWallPainter = targetComponent.GetType().Name == "WallPainter";
+
+                        if (isWallPainter)
+                        {
+                              // Получаем доступ к полям и методам через рефлексию
+                              mainCameraField = targetComponent.GetType().GetField("mainCamera");
+                              wallLayerMaskField = targetComponent.GetType().GetField("wallLayerMask");
+                              currentPaintMaterialField = targetComponent.GetType().GetField("currentPaintMaterial",
+                                  BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                              paintWallAtPositionMethod = targetComponent.GetType().GetMethod("PaintWallAtPosition");
+                        }
+                  }
+                  catch (System.Exception e)
+                  {
+                        Debug.LogError($"WallPainterInputDebugger: Error in OnEnable: {e.Message}");
                   }
             }
 
@@ -346,3 +362,4 @@ namespace Remalux.AR
             }
       }
 }
+#endif

@@ -1,3 +1,4 @@
+#if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -105,3 +106,4 @@ namespace Remalux.AR
             }
       }
 }
+#endif

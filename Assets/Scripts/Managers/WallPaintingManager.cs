@@ -7,6 +7,7 @@ using Remalux.AR;
 using UnityEngine.UI;
 using System.Collections;
 using System.Reflection;
+using UnityEngine.SceneManagement;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -30,6 +31,9 @@ namespace Remalux.AR
         public Material[] paintMaterials;
         public Material defaultWallMaterial;
 
+        private bool materialsLoaded = false;
+        private bool wallPainterInitialized = false;
+
         /// <summary>
         /// Возвращает подходящий шейдер в зависимости от используемого рендер пайплайна
         /// </summary>
@@ -50,7 +54,6 @@ namespace Remalux.AR
 
         private void Awake()
         {
-            // Singleton pattern to prevent multiple instances
             if (instance != null && instance != this)
             {
                 Debug.LogWarning("Found duplicate WallPaintingManager. Destroying duplicate.");
@@ -59,21 +62,50 @@ namespace Remalux.AR
             }
             instance = this;
 
-            // Load materials if not assigned
+            // Step 1: Load materials
+            LoadMaterials();
+        }
+
+        private void Start()
+        {
+            // Step 2: Initialize WallPainter
+            InitializeWallPainter();
+
+            // Step 3: Initialize other components with delay
+            StartCoroutine(DelayedInitialization());
+        }
+
+        private void LoadMaterials()
+        {
             if (paintMaterials == null || paintMaterials.Length == 0)
             {
                 LoadMaterialsFromColorManager();
             }
-            else
+
+            if (paintMaterials != null && paintMaterials.Length > 0)
             {
                 Debug.Log($"WallPaintingManager: loaded {paintMaterials.Length} paint materials");
-            }
 
-            // Check for default material
-            if (defaultWallMaterial == null && paintMaterials != null && paintMaterials.Length > 0)
+                if (defaultWallMaterial == null)
+                {
+                    defaultWallMaterial = paintMaterials[0];
+                    Debug.Log($"WallPaintingManager: set default material: {defaultWallMaterial.name}");
+                }
+
+                materialsLoaded = true;
+            }
+            else
             {
-                defaultWallMaterial = paintMaterials[0];
-                Debug.Log($"WallPaintingManager: set default material: {defaultWallMaterial.name}");
+                Debug.LogError("WallPaintingManager: Failed to load materials!");
+            }
+        }
+
+        private void InitializeWallPainter()
+        {
+            if (!materialsLoaded)
+            {
+                Debug.LogError("WallPaintingManager: Cannot initialize WallPainter - materials not loaded!");
+                return;
             }
 
             // Find or create WallPainter
@@ -92,155 +124,95 @@ namespace Remalux.AR
                 }
             }
 
-            // Find or create SimplePaintColorSelector
-            if (colorSelector == null)
-            {
-                var allMonoBehaviours = FindObjectsOfType<MonoBehaviour>();
-                var colorSelectors = allMonoBehaviours.Where(mb => mb.GetType().Name == "SimplePaintColorSelector").ToList();
-
-                if (colorSelectors.Count > 0)
-                {
-                    colorSelector = colorSelectors[0];
-                    Debug.Log("WallPaintingManager: found SimplePaintColorSelector in scene");
-
-                    // Clean up duplicates
-                    if (colorSelectors.Count > 1)
-                    {
-                        Debug.LogWarning($"Found {colorSelectors.Count} SimplePaintColorSelectors. Keeping only one instance.");
-                        for (int i = 1; i < colorSelectors.Count; i++)
-                        {
-                            Destroy(colorSelectors[i].gameObject);
-                        }
-                    }
-                }
-                else
-                {
-                    Debug.LogWarning("Could not find SimplePaintColorSelector in scene");
-                }
-            }
-
-            // Setup components with a delay to ensure proper initialization
-            StartCoroutine(DelayedInitialization());
-        }
-
-        private void SetupComponents()
-        {
-            if (wallPainter == null || colorSelector == null)
-            {
-                Debug.LogError("Cannot setup components: WallPainter or ColorSelector is missing");
-                return;
-            }
-
-            // Setup WallPainter
-            var defaultMaterialField = wallPainter.GetType().GetField("defaultMaterial",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-            if (defaultMaterialField != null)
-            {
-                defaultMaterialField.SetValue(wallPainter, defaultWallMaterial);
-                Debug.Log($"WallPaintingManager: set default material for WallPainter: {(defaultWallMaterial != null ? defaultWallMaterial.name : "null")}");
-            }
-
-            // Setup available paints
+            // Set up WallPainter materials
             var availablePaintsField = wallPainter.GetType().GetField("availablePaints",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-            if (availablePaintsField != null && paintMaterials != null && paintMaterials.Length > 0)
+                BindingFlags.Instance | BindingFlags.Public);
+            var defaultMaterialField = wallPainter.GetType().GetField("defaultMaterial",
+                BindingFlags.Instance | BindingFlags.Public);
+
+            if (availablePaintsField != null && paintMaterials != null)
             {
                 availablePaintsField.SetValue(wallPainter, paintMaterials);
-                Debug.Log($"WallPaintingManager: set {paintMaterials.Length} materials for WallPainter");
+                Debug.Log($"WallPaintingManager: Set {paintMaterials.Length} materials for WallPainter");
             }
 
-            // Setup SimplePaintColorSelector
-            var wallPainterField = colorSelector.GetType().GetField("wallPainter",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-            if (wallPainterField != null)
+            if (defaultMaterialField != null && defaultWallMaterial != null)
             {
-                wallPainterField.SetValue(colorSelector, wallPainter);
-                Debug.Log("WallPaintingManager: set WallPainter reference for SimplePaintColorSelector");
+                defaultMaterialField.SetValue(wallPainter, defaultWallMaterial);
+                Debug.Log($"WallPaintingManager: Set default material for WallPainter: {defaultWallMaterial.name}");
             }
 
-            var paintMaterialsField = colorSelector.GetType().GetField("paintMaterials",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-            if (paintMaterialsField != null && paintMaterials != null && paintMaterials.Length > 0)
-            {
-                paintMaterialsField.SetValue(colorSelector, paintMaterials);
-                Debug.Log($"WallPaintingManager: set {paintMaterials.Length} materials for SimplePaintColorSelector");
-            }
-
-            // Initialize the color selector
-            var initializeMethod = colorSelector.GetType().GetMethod("Initialize",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+            // Initialize WallPainter
+            var initializeMethod = wallPainter.GetType().GetMethod("Initialize",
+                BindingFlags.Instance | BindingFlags.Public);
             if (initializeMethod != null)
             {
-                initializeMethod.Invoke(colorSelector, null);
-                Debug.Log("WallPaintingManager: initialized SimplePaintColorSelector");
+                initializeMethod.Invoke(wallPainter, null);
+                wallPainterInitialized = true;
+                Debug.Log("WallPaintingManager: WallPainter initialized");
             }
-        }
-
-        private void Start()
-        {
-            // Вызываем инициализацию после того, как все компоненты прошли свои Awake и Start
-            StartCoroutine(DelayedInitialization());
         }
 
         private IEnumerator DelayedInitialization()
         {
-            // Ждем один кадр, чтобы все компоненты успели инициализироваться
-            yield return null;
-
-            // Инициализируем компоненты
-            InitializeComponents();
-        }
-
-        private void InitializeComponents()
-        {
-            // Initialize WallPainter with materials
-            if (wallPainter != null)
+            if (!wallPainterInitialized)
             {
-                // Set available paints and default material via reflection or direct reference
-                SetWallPainterMaterials();
+                Debug.LogError("WallPaintingManager: Cannot proceed with initialization - WallPainter not initialized!");
+                yield break;
             }
 
-            // Initialize SimplePaintColorSelector with materials
+            // Wait for WallPainter to be fully initialized
+            float timeout = 5f;
+            float elapsed = 0f;
+
+            while (!wallPainter.IsInitialized && elapsed < timeout)
+            {
+                elapsed += Time.deltaTime;
+                yield return null;
+            }
+
+            if (!wallPainter.IsInitialized)
+            {
+                Debug.LogError("WallPaintingManager: Timeout waiting for WallPainter initialization!");
+                yield break;
+            }
+
+            // Initialize color selector
             if (colorSelector != null)
             {
-                // Set paint materials directly since they are public
                 var paintMaterialsField = colorSelector.GetType().GetField("paintMaterials",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                    BindingFlags.Instance | BindingFlags.Public);
                 if (paintMaterialsField != null)
+                {
                     paintMaterialsField.SetValue(colorSelector, paintMaterials);
+                    Debug.Log($"WallPaintingManager: Set {paintMaterials.Length} materials for color selector");
+                }
 
-                // Установка ссылки на WallPainter
                 var wallPainterField = colorSelector.GetType().GetField("wallPainter",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                    BindingFlags.Instance | BindingFlags.Public);
                 if (wallPainterField != null)
+                {
                     wallPainterField.SetValue(colorSelector, wallPainter);
+                    Debug.Log("WallPaintingManager: Set WallPainter reference for color selector");
+                }
 
-                // Инициализация кнопок
                 var initializeMethod = colorSelector.GetType().GetMethod("Initialize",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                    BindingFlags.Instance | BindingFlags.Public);
                 if (initializeMethod != null)
+                {
                     initializeMethod.Invoke(colorSelector, null);
+                    Debug.Log("WallPaintingManager: Color selector initialized");
+                }
             }
 
             // Show UI
             if (paintingUI != null)
+            {
                 paintingUI.SetActive(true);
-        }
+                Debug.Log("WallPaintingManager: Painting UI activated");
+            }
 
-        private void SetWallPainterMaterials()
-        {
-            // Use reflection to set fields
-            var availablePaintsField = wallPainter.GetType().GetField("availablePaints",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-
-            var defaultMaterialField = wallPainter.GetType().GetField("defaultMaterial",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-
-            if (availablePaintsField != null && paintMaterials != null)
-                availablePaintsField.SetValue(wallPainter, paintMaterials);
-
-            if (defaultMaterialField != null && defaultWallMaterial != null)
-                defaultMaterialField.SetValue(wallPainter, defaultWallMaterial);
+            Debug.Log("WallPaintingManager: Initialization complete");
         }
 
         // Public methods for external control

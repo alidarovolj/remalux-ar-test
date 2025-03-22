@@ -1,7 +1,10 @@
+#if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
 using System.IO;
 using System.Collections.Generic;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
 
 namespace Remalux.AR
 {
@@ -131,3 +134,4 @@ namespace Remalux.AR
             }
       }
 }
+#endif

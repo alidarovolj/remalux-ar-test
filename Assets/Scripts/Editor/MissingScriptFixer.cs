@@ -1,3 +1,4 @@
+#if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
@@ -5,6 +6,9 @@ using UnityEngine.SceneManagement;
 using UnityEditor.SceneManagement;
 using System.Reflection;
 using System.Linq;
+using UnityEditor.Callbacks;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 
 namespace Remalux.AR
 {
@@ -517,7 +521,7 @@ namespace Remalux.AR
                               GameObject[] allObjects = Object.FindObjectsOfType<GameObject>();
                               foreach (GameObject obj in allObjects)
                               {
-                                    if (((1 << obj.layer) & wallLayerMask) != 0)
+                                    if ((((1 << obj.layer) & wallLayerMask) != 0) && obj.CompareTag("Wall"))
                                     {
                                           wallsFound = true;
                                           Debug.Log($"Найден объект на слое Wall: {obj.name}");
@@ -1157,7 +1161,7 @@ namespace Remalux.AR
 
                         foreach (GameObject obj in allObjects)
                         {
-                              if (((1 << obj.layer) & wallLayerMask) != 0 && obj.CompareTag("Wall"))
+                              if ((((1 << obj.layer) & wallLayerMask) != 0) && obj.CompareTag("Wall"))
                               {
                                     wallObjects.Add(obj);
                                     Debug.Log($"Найден объект на слое Wall: {obj.name}");
@@ -1334,7 +1338,7 @@ namespace Remalux.AR
 
                         foreach (GameObject obj in allObjects)
                         {
-                              if (((1 << obj.layer) & wallLayerMask) != 0)
+                              if ((((1 << obj.layer) & wallLayerMask) != 0) && obj.CompareTag("Wall"))
                               {
                                     wallObjects.Add(obj);
                                     Debug.Log($"Найден объект на слое Wall: {obj.name}");
@@ -1821,3 +1825,4 @@ namespace Remalux.AR
             }
       }
 }
+#endif

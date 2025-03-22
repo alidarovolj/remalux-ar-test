@@ -1,6 +1,9 @@
+#if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
 using System.Reflection;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
 
 namespace Remalux.AR
 {
@@ -352,3 +355,4 @@ namespace Remalux.AR
             }
       }
 }
+#endif

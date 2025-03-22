@@ -40,7 +40,7 @@ namespace Remalux.AR
 
             private void Awake()
             {
-                  // Initialize in Awake to ensure it's ready before other components
+                  Debug.Log("WallPainter: Awake called");
                   if (!_isInitialized)
                   {
                         Initialize();
@@ -49,36 +49,46 @@ namespace Remalux.AR
 
             private void Start()
             {
-                  // Ensure initialization in Start if not done in Awake
+                  Debug.Log("WallPainter: Start called");
                   if (!_isInitialized)
                   {
                         Initialize();
                   }
 
-                  // Check for input handlers and resolve conflicts
+                  if (!_isInitialized)
+                  {
+                        Debug.LogError("WallPainter: Failed to initialize in both Awake and Start!");
+                        return;
+                  }
+
+                  SetupInputHandlers();
+            }
+
+            private void SetupInputHandlers()
+            {
                   var enhancedInput = GetComponent<EnhancedWallPainterInput>();
                   var directInput = GetComponent<DirectInputHandler>();
 
                   if (enhancedInput != null && directInput != null)
                   {
-                        Debug.LogWarning("Multiple input handlers detected. Disabling DirectInputHandler.");
+                        Debug.LogWarning("WallPainter: Multiple input handlers detected. Disabling DirectInputHandler.");
                         directInput.enabled = false;
                         Destroy(directInput);
                         handleInputInternally = false;
                   }
                   else if (enhancedInput != null)
                   {
-                        Debug.Log("Using EnhancedWallPainterInput for input handling");
+                        Debug.Log("WallPainter: Using EnhancedWallPainterInput");
                         handleInputInternally = false;
                   }
                   else if (directInput != null)
                   {
-                        Debug.Log("Using DirectInputHandler for input handling");
+                        Debug.Log("WallPainter: Using DirectInputHandler");
                         handleInputInternally = false;
                   }
                   else
                   {
-                        Debug.Log("No external input handlers found. Using internal input handling.");
+                        Debug.Log("WallPainter: No external input handlers found. Using internal input handling.");
                         handleInputInternally = true;
                   }
             }
@@ -131,6 +141,17 @@ namespace Remalux.AR
 
             public void Initialize()
             {
+                  Debug.Log("WallPainter: Starting initialization...");
+
+                  // Check if already initialized
+                  if (_isInitialized)
+                  {
+                        Debug.Log("WallPainter: Already initialized");
+                        return;
+                  }
+
+                  bool initSuccess = true;
+
                   // Initialize camera
                   if (mainCamera == null)
                   {
@@ -138,7 +159,11 @@ namespace Remalux.AR
                         if (mainCamera == null)
                         {
                               Debug.LogError("WallPainter: No camera found!");
-                              return;
+                              initSuccess = false;
+                        }
+                        else
+                        {
+                              Debug.Log($"WallPainter: Using main camera: {mainCamera.name}");
                         }
                   }
 
@@ -154,7 +179,7 @@ namespace Remalux.AR
                         else
                         {
                               Debug.LogError("WallPainter: 'Wall' layer not found!");
-                              return;
+                              initSuccess = false;
                         }
                   }
 
@@ -171,14 +196,14 @@ namespace Remalux.AR
                         else
                         {
                               Debug.LogError("WallPainter: No paint materials available!");
-                              return;
+                              initSuccess = false;
                         }
                   }
 
                   // Initialize default material
                   if (defaultMaterial == null)
                   {
-                        if (availablePaints.Length > 0)
+                        if (availablePaints != null && availablePaints.Length > 0)
                         {
                               defaultMaterial = availablePaints[0];
                               Debug.Log($"WallPainter: Using first paint as default: {defaultMaterial.name}");
@@ -186,44 +211,55 @@ namespace Remalux.AR
                         else
                         {
                               Debug.LogError("WallPainter: No default material and no available paints!");
-                              return;
+                              initSuccess = false;
                         }
                   }
 
                   // Initialize current paint material
-                  currentPaintMaterial = defaultMaterial;
-                  Debug.Log($"WallPainter: Current paint material set to: {currentPaintMaterial.name}");
-
-                  // Initialize color preview
-                  if (showColorPreview)
+                  if (initSuccess)
                   {
-                        if (colorPreviewPrefab != null)
+                        currentPaintMaterial = defaultMaterial;
+                        Debug.Log($"WallPainter: Current paint material set to: {currentPaintMaterial.name}");
+
+                        // Initialize color preview
+                        if (showColorPreview)
                         {
-                              colorPreview = Instantiate(colorPreviewPrefab);
-                        }
-                        else
-                        {
-                              colorPreview = CreateColorPreviewObject();
+                              if (colorPreviewPrefab != null)
+                              {
+                                    colorPreview = Instantiate(colorPreviewPrefab);
+                                    Debug.Log("WallPainter: Created color preview from prefab");
+                              }
+                              else
+                              {
+                                    colorPreview = CreateColorPreviewObject();
+                                    Debug.Log("WallPainter: Created default color preview object");
+                              }
+
+                              previewComponent = colorPreview.GetComponent<SimpleColorPreview>();
+                              if (previewComponent == null)
+                              {
+                                    previewComponent = colorPreview.AddComponent<SimpleColorPreview>();
+                              }
+                              colorPreview.SetActive(false);
+                              Debug.Log("WallPainter: Color preview initialized");
                         }
 
-                        previewComponent = colorPreview.GetComponent<SimpleColorPreview>();
-                        if (previewComponent == null)
-                        {
-                              previewComponent = colorPreview.AddComponent<SimpleColorPreview>();
-                        }
-                        colorPreview.SetActive(false);
-                        Debug.Log("WallPainter: Color preview initialized");
+                        _isInitialized = true;
+                        Debug.Log("WallPainter: Initialization complete");
                   }
-
-                  _isInitialized = true;
-                  Debug.Log("WallPainter: Initialization complete");
+                  else
+                  {
+                        Debug.LogError("WallPainter: Initialization failed!");
+                  }
             }
 
             private void Update()
             {
-                  if (!_isInitialized) return;
+                  if (!_isInitialized)
+                  {
+                        return;
+                  }
 
-                  // Only handle input internally if no external handlers exist
                   if (handleInputInternally && UnityEngine.Input.GetMouseButtonDown(0))
                   {
                         PaintWallAtPosition(UnityEngine.Input.mousePosition);

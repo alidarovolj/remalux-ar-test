@@ -1,5 +1,8 @@
+#if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
 using System.IO;
 using System.Collections.Generic;
 using System.Reflection;
@@ -735,3 +738,4 @@ namespace Remalux.AR
             }
       }
 }
+#endif

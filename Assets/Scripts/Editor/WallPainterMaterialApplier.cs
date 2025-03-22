@@ -1,7 +1,10 @@
+#if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
 using System.Reflection;
 using System.Collections.Generic;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
 
 namespace Remalux.AR
 {
@@ -125,7 +128,7 @@ namespace Remalux.AR
                   {
                         EditorGUI.indentLevel++;
 
-                        // Кнопка для проверки материалов
+                        // Кнопка для проверки материалов стен
                         if (GUILayout.Button("Проверить материалы стен"))
                         {
                               CheckWallMaterials();
@@ -455,3 +458,4 @@ namespace Remalux.AR
             }
       }
 }
+#endif
