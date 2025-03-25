@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using System.IO;
 using System.Collections.Generic;
+using Remalux.WallPainting.Vision;
 
 namespace Remalux.Editor
 {
@@ -24,7 +25,7 @@ namespace Remalux.Editor
 
             // Конвертируем абсолютный путь в относительный путь проекта
             string relativePath = "Assets" + scenePath.Substring(Application.dataPath.Length);
-            
+
             // Открываем сцену
             if (!EditorSceneManager.OpenScene(relativePath).IsValid())
             {
@@ -34,13 +35,13 @@ namespace Remalux.Editor
 
             // Удаляем AR компоненты
             RemoveARComponents();
-            
+
             // Настраиваем компоненты компьютерного зрения
             SetupComputerVisionComponents();
-            
+
             // Сохраняем сцену
             EditorSceneManager.SaveOpenScenes();
-            
+
             Debug.Log("Система настроена для работы без AR. Используется только компьютерное зрение.");
         }
 
@@ -49,17 +50,17 @@ namespace Remalux.Editor
             // Находим и удаляем AR Session
             var arSessions = Object.FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             List<MonoBehaviour> toRemove = new List<MonoBehaviour>();
-            
+
             foreach (var component in arSessions)
             {
-                if (component.GetType().Name.Contains("ARSession") || 
+                if (component.GetType().Name.Contains("ARSession") ||
                     component.GetType().Name.Contains("ARPlane") ||
                     component.GetType().Name.Contains("ARRaycast"))
                 {
                     toRemove.Add(component);
                 }
             }
-            
+
             foreach (var component in toRemove)
             {
                 Debug.Log($"Удаляем AR компонент: {component.GetType().Name}");
@@ -70,23 +71,23 @@ namespace Remalux.Editor
         private static void SetupComputerVisionComponents()
         {
             // Находим контроллер покраски стен
-            var controller = Object.FindAnyObjectByType<Remalux.AR.Vision.RealWallPaintingController>();
+            var controller = Object.FindAnyObjectByType<RealWallPaintingController>();
             if (controller == null)
             {
                 Debug.LogError("Не найден контроллер RealWallPaintingController");
                 return;
             }
-            
+
             // Находим или создаем детектор стен на основе компьютерного зрения
-            var wallDetector = Object.FindAnyObjectByType<Remalux.AR.Vision.WallDetector>();
+            var wallDetector = Object.FindAnyObjectByType<WallDetector>();
             if (wallDetector == null)
             {
                 // Создаем новый объект для детектора стен
                 GameObject detectorObj = new GameObject("WallDetector");
-                wallDetector = detectorObj.AddComponent<Remalux.AR.Vision.WallDetector>();
+                wallDetector = detectorObj.AddComponent<WallDetector>();
                 Debug.Log("Создан новый детектор стен на основе компьютерного зрения");
             }
-            
+
             // Настраиваем камеру
             Camera mainCamera = Camera.main;
             if (mainCamera == null)
@@ -94,12 +95,12 @@ namespace Remalux.Editor
                 Debug.LogError("Не найдена основная камера");
                 return;
             }
-            
+
             // Убеждаемся, что камера настроена правильно
             mainCamera.clearFlags = CameraClearFlags.Skybox;
             mainCamera.backgroundColor = Color.black;
-            
+
             Debug.Log("Камера настроена для работы с компьютерным зрением");
         }
     }
-} 
+}

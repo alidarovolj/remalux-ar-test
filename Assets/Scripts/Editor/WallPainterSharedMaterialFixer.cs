@@ -4,6 +4,8 @@ using UnityEditor;
 using System.Reflection;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
+using System.Collections.Generic;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {
@@ -81,7 +83,7 @@ namespace Remalux.AR
                                     Material instanceMaterial = new Material(sharedMaterial);
                                     instanceMaterial.name = $"{sharedMaterial.name}_Instance_{wallObject.name}";
                                     renderer.sharedMaterial = instanceMaterial;
-                                    tracker.instancedMaterial = instanceMaterial;
+                                    tracker.InstancedMaterial = instanceMaterial;
                                     Debug.Log($"  - Created and applied material instance: {instanceMaterial.name}");
                                     anyChanges = true;
                               }
@@ -226,8 +228,10 @@ namespace Remalux.AR
                                     WallMaterialInstanceTracker tracker = obj.GetComponent<WallMaterialInstanceTracker>();
                                     if (tracker != null)
                                     {
-                                          // Используем метод компонента для применения материала
-                                          tracker.ApplyMaterial(currentPaintMaterial);
+                                          if (tracker.InstancedMaterial != null)
+                                          {
+                                                tracker.InstancedMaterial.color = currentPaintMaterial.color;
+                                          }
                                           paintedCount++;
                                     }
                                     else
@@ -242,7 +246,12 @@ namespace Remalux.AR
                                           // Добавляем компонент для отслеживания
                                           tracker = obj.AddComponent<WallMaterialInstanceTracker>();
                                           tracker.OriginalSharedMaterial = renderer.sharedMaterial;
-                                          tracker.instancedMaterial = instancedMaterial;
+                                          tracker.InstancedMaterial = instancedMaterial;
+
+                                          if (tracker.InstancedMaterial != null)
+                                          {
+                                                tracker.InstancedMaterial.color = currentPaintMaterial.color;
+                                          }
 
                                           Debug.Log($"  - Применен материал {instancedMaterial.name} к объекту {obj.name}");
                                           paintedCount++;

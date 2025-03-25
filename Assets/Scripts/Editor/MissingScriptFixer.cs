@@ -9,6 +9,7 @@ using System.Linq;
 using UnityEditor.Callbacks;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {
@@ -404,7 +405,7 @@ namespace Remalux.AR
                                                             Material instanceMaterial = new Material(renderer.sharedMaterial);
                                                             instanceMaterial.name = $"{renderer.sharedMaterial.name}_Instance_{obj.name}";
                                                             renderer.sharedMaterial = instanceMaterial;
-                                                            tracker.instancedMaterial = instanceMaterial;
+                                                            tracker.InstancedMaterial = instanceMaterial;
                                                             Debug.Log($"Created unique material instance for {obj.name}");
                                                       }
 
@@ -1712,7 +1713,7 @@ namespace Remalux.AR
                                           Material instanceMaterial = new Material(renderer.sharedMaterial);
                                           instanceMaterial.name = $"{renderer.sharedMaterial.name}_Instance_{wallObj.name}";
                                           renderer.sharedMaterial = instanceMaterial;
-                                          tracker.instancedMaterial = instanceMaterial;
+                                          tracker.InstancedMaterial = instanceMaterial;
                                           Debug.Log($"Создан уникальный экземпляр материала для {wallObj.name}");
                                     }
 

@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {
@@ -213,7 +214,7 @@ namespace Remalux.AR
 
                                                 // Применяем экземпляр материала (используем sharedMaterial в режиме редактора)
                                                 renderer.sharedMaterial = instanceMaterial;
-                                                tracker.instancedMaterial = instanceMaterial;
+                                                tracker.InstancedMaterial = instanceMaterial;
 
                                                 Debug.Log($"  - Fixed material for object {obj.name}: {sharedMaterial.name} -> {instanceMaterial.name}");
                                                 fixedCount++;

@@ -4,6 +4,7 @@ using UnityEditor;
 using System.IO;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {
@@ -75,7 +76,7 @@ namespace Remalux.AR
                         var tracker = renderer.GetComponent<WallMaterialInstanceTracker>();
                         if (tracker != null)
                         {
-                              tracker.ResetToOriginal();
+                              tracker.ResetToOriginalMaterial();
                         }
                   }
             }

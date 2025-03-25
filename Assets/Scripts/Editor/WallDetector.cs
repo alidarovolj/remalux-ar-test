@@ -3,6 +3,8 @@ using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using System.Collections.Generic;
+using UnityEngine.SceneManagement;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {

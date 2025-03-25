@@ -4,6 +4,7 @@ using UnityEditor;
 using System.Collections.Generic;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {
@@ -188,7 +189,7 @@ namespace Remalux.AR
                                     Debug.Log($"Created and applied new material instance for {tracker.gameObject.name}");
 
                                     // Update the tracker's instanced material reference
-                                    tracker.instancedMaterial = instanceMaterial;
+                                    tracker.InstancedMaterial = instanceMaterial;
                               }
 
                               // Mark objects as dirty to ensure changes are saved

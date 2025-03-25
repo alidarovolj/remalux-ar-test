@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Collections.Generic;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {
@@ -141,7 +142,7 @@ namespace Remalux.AR
                   {
                         Debug.Log("  - Found WallMaterialInstanceTracker component");
                         Debug.Log($"    - Original material: {(instanceTracker.OriginalSharedMaterial != null ? instanceTracker.OriginalSharedMaterial.name : "null")}");
-                        Debug.Log($"    - Current material: {(instanceTracker.instancedMaterial != null ? instanceTracker.instancedMaterial.name : "null")}");
+                        Debug.Log($"    - Current material: {(instanceTracker.InstancedMaterial != null ? instanceTracker.InstancedMaterial.name : "null")}");
                   }
                   else
                   {

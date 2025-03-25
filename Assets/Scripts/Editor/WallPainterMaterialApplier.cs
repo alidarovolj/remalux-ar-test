@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Collections.Generic;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {
@@ -196,7 +197,7 @@ namespace Remalux.AR
                                           // Добавляем компонент для отслеживания
                                           tracker = obj.AddComponent<WallMaterialInstanceTracker>();
                                           tracker.OriginalSharedMaterial = renderer.sharedMaterial;
-                                          tracker.instancedMaterial = instancedMaterial;
+                                          tracker.InstancedMaterial = instancedMaterial;
                                     }
 
                                     paintedCount++;
@@ -274,7 +275,7 @@ namespace Remalux.AR
                                           {
                                                 tracker = obj.AddComponent<WallMaterialInstanceTracker>();
                                                 tracker.OriginalSharedMaterial = sharedMaterial;
-                                                tracker.instancedMaterial = instancedMaterial;
+                                                tracker.InstancedMaterial = instancedMaterial;
                                           }
 
                                           fixedCount++;
@@ -365,7 +366,7 @@ namespace Remalux.AR
                                           // Добавляем компонент для отслеживания
                                           tracker = hit.collider.gameObject.AddComponent<WallMaterialInstanceTracker>();
                                           tracker.OriginalSharedMaterial = renderer.sharedMaterial;
-                                          tracker.instancedMaterial = instancedMaterial;
+                                          tracker.InstancedMaterial = instancedMaterial;
                                     }
 
                                     Debug.Log($"WallPainterMaterialApplier: Материал {currentPaintMaterial.name} применен напрямую к объекту {hit.collider.gameObject.name}");
@@ -436,7 +437,7 @@ namespace Remalux.AR
                                           // Добавляем компонент для отслеживания
                                           tracker = hit.collider.gameObject.AddComponent<WallMaterialInstanceTracker>();
                                           tracker.OriginalSharedMaterial = renderer.sharedMaterial;
-                                          tracker.instancedMaterial = instancedMaterial;
+                                          tracker.InstancedMaterial = instancedMaterial;
                                     }
 
                                     Debug.Log($"WallPainterMaterialApplier: Материал {currentPaintMaterial.name} применен напрямую к объекту {hit.collider.gameObject.name}");

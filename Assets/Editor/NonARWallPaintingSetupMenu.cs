@@ -1,7 +1,8 @@
 using UnityEngine;
 using UnityEditor;
+using Remalux.WallPainting.Vision;
 
-namespace Remalux.AR.Editor
+namespace Remalux.Editor
 {
     /// <summary>
     /// Класс для добавления пункта меню для настройки сцены без AR
@@ -11,7 +12,7 @@ namespace Remalux.AR.Editor
         [MenuItem("Window/Remalux/Настроить систему покраски стен (без AR)")]
         public static void SetupNonARWallPaintingSystem()
         {
-            Vision.NonARWallPaintingSetup.CreateNonARWallPaintingScene();
+            NonARWallPaintingSetup.CreateNonARWallPaintingScene();
         }
     }
-} 
+}

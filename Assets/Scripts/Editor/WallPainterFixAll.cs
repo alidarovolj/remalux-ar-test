@@ -7,6 +7,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {

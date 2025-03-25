@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
 using System.Linq;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {
@@ -37,14 +38,14 @@ namespace Remalux.AR
             EditorGUILayout.Space();
 
             defaultWallMaterial = EditorGUILayout.ObjectField("Материал стены по умолчанию", defaultWallMaterial, typeof(Material), false) as Material;
-            
+
             EditorGUILayout.Space();
-            
+
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             setupAllWalls = EditorGUILayout.ToggleLeft("Настроить все объекты на слое Wall", setupAllWalls);
             setupSelectedOnly = EditorGUILayout.ToggleLeft("Настроить только выбранные объекты", setupSelectedOnly);
             EditorGUILayout.EndVertical();
-            
+
             if (setupAllWalls && setupSelectedOnly)
             {
                 setupAllWalls = !setupSelectedOnly;
@@ -146,23 +147,23 @@ namespace Remalux.AR
                 if (renderer != null && defaultWallMaterial != null)
                 {
                     tracker.OriginalSharedMaterial = defaultWallMaterial;
-                    
+
                     // Создаем экземпляр материала
                     Material instanceMaterial = new Material(defaultWallMaterial);
                     instanceMaterial.name = $"{defaultWallMaterial.name}_Instance_{wallObj.name}";
                     renderer.sharedMaterial = instanceMaterial;
-                    
+
                     Debug.Log($"Настроен материал для объекта {wallObj.name}");
                 }
 
                 objectsProcessed++;
             }
 
-            EditorUtility.DisplayDialog("Готово", 
+            EditorUtility.DisplayDialog("Готово",
                 $"Обработано {objectsProcessed} объектов.\n" +
                 $"Добавлено {trackersAdded} компонентов WallMaterialInstanceTracker.\n" +
-                $"Добавлено {collidersAdded} компонентов Collider.", 
+                $"Добавлено {collidersAdded} компонентов Collider.",
                 "OK");
         }
     }
-} 
+}

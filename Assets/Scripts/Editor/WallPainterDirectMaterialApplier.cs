@@ -4,6 +4,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
+using Remalux.WallPainting;
 
 namespace Remalux.AR
 {
