@@ -5,6 +5,7 @@ using OpenCVForUnity.CoreModule;
 using OpenCVForUnity.ImgprocModule;
 using OpenCVForUnity.UnityUtils;
 using OpenCVForUnity.UtilsModule;
+using System.Collections;
 
 namespace Remalux.WallPainting.Vision
 {
@@ -14,8 +15,8 @@ namespace Remalux.WallPainting.Vision
 
             [Header("Camera Settings")]
             [SerializeField] private bool useWebcam = true;
-            [SerializeField] private int webcamDeviceIndex = 0;
-            [SerializeField] private Vector2Int webcamResolution = new Vector2Int(640, 480);
+            [SerializeField] private int webcamDeviceIndex = 1; // Используем iPhone камеру по умолчанию
+            [SerializeField] private Vector2Int webcamResolution = new Vector2Int(1280, 720);
             [SerializeField] private int targetFPS = 30;
 
             [Header("Detection Settings")]
@@ -49,26 +50,46 @@ namespace Remalux.WallPainting.Vision
             private float fpsUpdateInterval = 1f;
             private float nextFpsUpdate;
             private float currentFPS;
+            private Mat inputMat;
+            private Mat workingMat;
+            private Mat lines;
+            private Texture2D debugTexture;
+            private bool isInitialized = false;
 
             private void Start()
             {
-                  InitializeCamera();
-                  InitializeOpenCV();
+                  if (!isInitialized)
+                  {
+                        InitializeCamera();
+                        InitializeOpenCV();
+                        isInitialized = true;
+                  }
             }
 
             private void InitializeOpenCV()
             {
-                  processedMat = new Mat();
-                  debugMat = new Mat();
+                  if (webCamTexture == null) return;
+
+                  // Initialize Mats with correct size
+                  inputMat = new Mat(webCamTexture.height, webCamTexture.width, CvType.CV_8UC4);
+                  processedMat = new Mat(webCamTexture.height, webCamTexture.width, CvType.CV_8UC1);
+                  debugMat = new Mat(webCamTexture.height, webCamTexture.width, CvType.CV_8UC4);
+                  lines = new Mat();
+
                   if (useProcessingResolution)
                   {
-                        resizedMat = new Mat();
+                        resizedMat = new Mat(processingResolution.y, processingResolution.x, CvType.CV_8UC4);
+                        workingMat = resizedMat;
+                  }
+                  else
+                  {
+                        workingMat = inputMat;
                   }
             }
 
-            private void InitializeCamera()
+            private IEnumerator InitializeCameraCoroutine()
             {
-                  if (!useWebcam) return;
+                  if (!useWebcam) yield break;
 
                   // Stop any existing webcam
                   if (webCamTexture != null)
@@ -83,7 +104,7 @@ namespace Remalux.WallPainting.Vision
                   if (devices.Length == 0)
                   {
                         Debug.LogError("No webcam found!");
-                        return;
+                        yield break;
                   }
 
                   // Log available devices
@@ -95,29 +116,52 @@ namespace Remalux.WallPainting.Vision
 
                   // Use specified device index or default to 0
                   webcamDeviceIndex = Mathf.Clamp(webcamDeviceIndex, 0, devices.Length - 1);
+                  string deviceName = devices[webcamDeviceIndex].name;
 
-                  // Create and configure webcam texture
-                  webCamTexture = new WebCamTexture(devices[webcamDeviceIndex].name, webcamResolution.x, webcamResolution.y, targetFPS);
+                  // Try different resolutions in order of preference
+                  Vector2Int[] resolutions = new Vector2Int[] {
+                        new Vector2Int(1280, 720),
+                        new Vector2Int(640, 480),
+                        new Vector2Int(320, 240)
+                  };
 
-                  // Start the webcam
-                  webCamTexture.Play();
-
-                  // Wait for webcam to start
-                  float startTime = Time.time;
-                  while (!webCamTexture.isPlaying && !webCamTexture.didUpdateThisFrame && (Time.time - startTime) < 3f)
+                  bool initialized = false;
+                  foreach (var resolution in resolutions)
                   {
-                        System.Threading.Thread.Sleep(100);
+                        Debug.Log($"Trying resolution: {resolution.x}x{resolution.y}");
+
+                        webCamTexture = new WebCamTexture(deviceName, resolution.x, resolution.y, targetFPS);
+                        webCamTexture.Play();
+
+                        // Wait for webcam to start
+                        float startTime = Time.time;
+                        int attempts = 0;
+                        while (attempts < 10)
+                        {
+                              yield return new WaitForSeconds(0.5f);
+
+                              if (webCamTexture.width > 16 && webCamTexture.height > 16)
+                              {
+                                    Debug.Log($"Successfully initialized camera at {webCamTexture.width}x{webCamTexture.height}");
+                                    initialized = true;
+                                    break;
+                              }
+                              attempts++;
+                        }
+
+                        if (initialized) break;
+
+                        Debug.Log($"Failed to initialize at {resolution.x}x{resolution.y}, got {webCamTexture.width}x{webCamTexture.height}");
+                        webCamTexture.Stop();
+                        Destroy(webCamTexture);
+                        yield return new WaitForSeconds(0.5f);
                   }
 
-                  if (!webCamTexture.isPlaying)
+                  if (!initialized)
                   {
-                        Debug.LogError("Failed to start webcam!");
-                        return;
+                        Debug.LogError("Failed to initialize camera at any resolution!");
+                        yield break;
                   }
-
-                  // Log webcam info
-                  Debug.Log($"Webcam started: {webCamTexture.width}x{webCamTexture.height} @ {webCamTexture.requestedFPS}fps");
-                  Debug.Log($"Device: {webCamTexture.deviceName}");
 
                   // Set initial texture for debug display
                   if (debugImageDisplay != null)
@@ -125,22 +169,27 @@ namespace Remalux.WallPainting.Vision
                         debugImageDisplay.texture = webCamTexture;
                         Debug.Log("Debug image display set with webcam texture");
                   }
-                  else
-                  {
-                        Debug.LogWarning("Debug image display is not assigned!");
-                  }
+
+                  // Initialize OpenCV Mats with correct size
+                  InitializeOpenCV();
             }
 
             public void StartDetection()
             {
-                  if (webCamTexture == null || !webCamTexture.isPlaying)
+                  if (!isInitialized)
                   {
-                        InitializeCamera();
+                        isInitialized = true;
+                        StartCoroutine(InitializeCameraCoroutine());
                   }
                   isDetecting = true;
                   lastDetectionTime = Time.time;
                   nextFpsUpdate = Time.time + fpsUpdateInterval;
                   frameCount = 0;
+            }
+
+            private void InitializeCamera()
+            {
+                  StartCoroutine(InitializeCameraCoroutine());
             }
 
             public void StopDetection()
@@ -159,61 +208,79 @@ namespace Remalux.WallPainting.Vision
 
             private void Update()
             {
-                  if (!isDetecting) return;
+                  if (!isDetecting || webCamTexture == null || !webCamTexture.isPlaying)
+                  {
+                        return;
+                  }
 
+                  float deltaTime = Time.deltaTime;
+                  if (deltaTime > 0)
+                  {
+                        currentFPS = Mathf.Lerp(currentFPS, 1.0f / deltaTime, 0.1f);
+                  }
+
+                  // Only process if enough time has passed since last detection
                   if (Time.time - lastDetectionTime >= detectionInterval)
                   {
-                        float startTime = Time.realtimeSinceStartup;
-                        DetectWalls();
-                        processingTime = Time.realtimeSinceStartup - startTime;
-
-                        frameCount++;
-                        if (Time.time >= nextFpsUpdate)
-                        {
-                              currentFPS = frameCount / fpsUpdateInterval;
-                              frameCount = 0;
-                              nextFpsUpdate = Time.time + fpsUpdateInterval;
-
-                              if (showPerformanceStats)
-                              {
-                                    Debug.Log($"FPS: {currentFPS:F1}, Processing time: {processingTime * 1000:F1}ms");
-                              }
-                        }
-
                         lastDetectionTime = Time.time;
+                        float startTime = Time.realtimeSinceStartup;
+
+                        DetectWalls();
+
+                        float processingTime = (Time.realtimeSinceStartup - startTime) * 1000f;
+                        if (showPerformanceStats)
+                        {
+                              Debug.Log($"FPS: {currentFPS:F1}, Processing time: {processingTime:F1}ms");
+                        }
                   }
             }
 
             private void DetectWalls()
             {
-                  if (!webCamTexture.isPlaying || !webCamTexture.didUpdateThisFrame)
+                  if (webCamTexture == null || !webCamTexture.isPlaying || !webCamTexture.didUpdateThisFrame)
                         return;
 
                   try
                   {
+                        // Ensure Mat objects are initialized
+                        if (inputMat == null || processedMat == null || debugMat == null || lines == null)
+                        {
+                              Debug.LogWarning("Mat objects not initialized. Reinitializing OpenCV...");
+                              InitializeOpenCV();
+                              if (inputMat == null || processedMat == null || debugMat == null || lines == null)
+                              {
+                                    Debug.LogError("Failed to initialize Mat objects!");
+                                    return;
+                              }
+                        }
+
+                        // Ensure Mat sizes match
+                        if (inputMat.width() != webCamTexture.width || inputMat.height() != webCamTexture.height)
+                        {
+                              Debug.Log($"Reinitializing Mats to match camera resolution: {webCamTexture.width}x{webCamTexture.height}");
+                              InitializeOpenCV();
+                        }
+
                         // Convert WebCamTexture to Mat
-                        Mat inputMat = new Mat(webCamTexture.height, webCamTexture.width, CvType.CV_8UC3);
                         Utils.webCamTextureToMat(webCamTexture, inputMat);
 
-                        Mat workingMat = inputMat;
-                        if (useProcessingResolution)
+                        if (useProcessingResolution && resizedMat != null)
                         {
                               // Resize for processing
                               Imgproc.resize(inputMat, resizedMat, new Size(processingResolution.x, processingResolution.y));
-                              workingMat = resizedMat;
                         }
 
                         // Convert to grayscale
-                        Imgproc.cvtColor(workingMat, processedMat, Imgproc.COLOR_RGB2GRAY);
+                        Imgproc.cvtColor(workingMat, processedMat, Imgproc.COLOR_RGBA2GRAY);
 
                         // Apply Gaussian blur
                         Imgproc.GaussianBlur(processedMat, processedMat, new Size(5, 5), 0);
 
                         // Edge detection
+                        lines.release(); // Clear previous lines
                         Imgproc.Canny(processedMat, processedMat, cannyThreshold1, cannyThreshold2);
 
                         // Line detection
-                        Mat lines = new Mat();
                         Imgproc.HoughLinesP(
                               processedMat,
                               lines,
@@ -274,20 +341,20 @@ namespace Remalux.WallPainting.Vision
                                     // Update debug display
                                     if (debugImageDisplay != null)
                                     {
-                                          Texture2D texture = new Texture2D(debugMat.cols(), debugMat.rows(), TextureFormat.RGBA32, false);
-                                          Utils.matToTexture2D(debugMat, texture);
-                                          debugImageDisplay.texture = texture;
+                                          if (debugTexture == null)
+                                          {
+                                                debugTexture = new Texture2D(debugMat.cols(), debugMat.rows(), TextureFormat.RGBA32, false);
+                                          }
+                                          Utils.matToTexture2D(debugMat, debugTexture, true);
+                                          debugImageDisplay.texture = debugTexture;
                                     }
                               }
 
-                              if (walls.Count > 0)
+                              if (walls.Count > 0 && OnWallsDetected != null)
                               {
-                                    OnWallsDetected?.Invoke(walls);
+                                    OnWallsDetected.Invoke(walls);
                               }
                         }
-
-                        inputMat.Dispose();
-                        lines.Dispose();
                   }
                   catch (System.Exception e)
                   {
@@ -327,20 +394,12 @@ namespace Remalux.WallPainting.Vision
                         Destroy(webCamTexture);
                   }
 
-                  if (processedMat != null)
-                  {
-                        processedMat.Dispose();
-                  }
-
-                  if (debugMat != null)
-                  {
-                        debugMat.Dispose();
-                  }
-
-                  if (resizedMat != null)
-                  {
-                        resizedMat.Dispose();
-                  }
+                  if (processedMat != null) processedMat.Dispose();
+                  if (debugMat != null) debugMat.Dispose();
+                  if (resizedMat != null) resizedMat.Dispose();
+                  if (inputMat != null) inputMat.Dispose();
+                  if (lines != null) lines.Dispose();
+                  if (debugTexture != null) Destroy(debugTexture);
             }
       }
 
