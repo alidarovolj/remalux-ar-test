@@ -19,7 +19,7 @@ namespace Remalux.AR
             public Material currentPaintMaterial;
 
             [Header("OpenCV настройки")]
-            public int webCamIndex = 1; // 0 = встроенная камера, 1 = внешняя камера
+            public int webCamIndex = 0; // 0 = встроенная камера, 1 = внешняя камера
             public int webCamWidth = 1280;
             public int webCamHeight = 720;
             public int webCamFPS = 30;
@@ -358,5 +358,17 @@ namespace Remalux.AR
             }
         }
 #endif
+
+            public Material CurrentPaintMaterial
+            {
+                  get => currentPaintMaterial;
+            }
+
+            public void SetCurrentPaintMaterial(Material material)
+            {
+                  if (material == null) return;
+                  currentPaintMaterial = material;
+                  Debug.Log($"Установлен новый материал для покраски: {material.name}");
+            }
       }
 }

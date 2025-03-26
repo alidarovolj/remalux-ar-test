@@ -1,0 +1,114 @@
+#pragma kernel LineDetector
+
+struct Line
+{
+    float x1;
+    float y1;
+    float x2;
+    float y2;
+};
+
+RWStructuredBuffer<float> lines;
+RWStructuredBuffer<Line> result;
+RWStructuredBuffer<uint> lineCount; // Add counter buffer for atomic operations
+int width;
+int height;
+float threshold;
+float minLength;
+float maxGap;
+
+// Hough transform parameters
+#define HOUGH_THRESHOLD 50
+#define HOUGH_RHO 1.0f
+#define HOUGH_THETA 0.0174532925f // PI/180
+
+[numthreads(8,8,1)]
+void LineDetector (uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.y * width + id.x;
+    if (idx >= width * height) return;
+
+    // Get edge pixel
+    float edge = lines[idx];
+    if (edge < threshold) return;
+
+    // Perform local line detection
+    float angle = 0;
+    float rho = 0;
+    int votes = 0;
+
+    // Check 8 directions
+    for (int i = 0; i < 8; i++)
+    {
+        float dx = cos(angle);
+        float dy = sin(angle);
+        float x = id.x;
+        float y = id.y;
+        int localVotes = 0;
+
+        // Check line in both directions
+        for (float t = -maxGap; t <= maxGap; t += 1.0f)
+        {
+            int checkX = (int)(x + dx * t);
+            int checkY = (int)(y + dy * t);
+
+            if (checkX >= 0 && checkX < width && checkY >= 0 && checkY < height)
+            {
+                if (lines[checkY * width + checkX] >= threshold)
+                {
+                    localVotes++;
+                }
+            }
+        }
+
+        if (localVotes > votes)
+        {
+            votes = localVotes;
+            rho = x * cos(angle) + y * sin(angle);
+        }
+
+        angle += HOUGH_THETA;
+    }
+
+    // If we found a significant line
+    if (votes >= HOUGH_THRESHOLD)
+    {
+        // Calculate line endpoints
+        float a = cos(rho);
+        float b = sin(rho);
+        float x0 = a * rho;
+        float y0 = b * rho;
+        float x1 = x0 + 1000 * (-b);
+        float y1 = y0 + 1000 * (a);
+        float x2 = x0 - 1000 * (-b);
+        float y2 = y0 - 1000 * (a);
+
+        // Clip to image bounds
+        if (x1 < 0) { y1 = y1 + (0 - x1) * (y2 - y1) / (x2 - x1); x1 = 0; }
+        if (x2 < 0) { y2 = y2 + (0 - x2) * (y1 - y2) / (x1 - x2); x2 = 0; }
+        if (x1 >= width) { y1 = y1 + (width - 1 - x1) * (y2 - y1) / (x2 - x1); x1 = width - 1; }
+        if (x2 >= width) { y2 = y2 + (width - 1 - x2) * (y1 - y2) / (x1 - x2); x2 = width - 1; }
+        if (y1 < 0) { x1 = x1 + (0 - y1) * (x2 - x1) / (y2 - y1); y1 = 0; }
+        if (y2 < 0) { x2 = x2 + (0 - y2) * (x1 - x2) / (y1 - y2); y2 = 0; }
+        if (y1 >= height) { x1 = x1 + (height - 1 - y1) * (x2 - x1) / (y2 - y1); y1 = height - 1; }
+        if (y2 >= height) { x2 = x2 + (height - 1 - y2) * (x1 - x2) / (y1 - y2); y2 = height - 1; }
+
+        // Calculate line length
+        float length = sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+
+        // Only add if line is long enough
+        if (length >= minLength)
+        {
+            // Add line to result buffer using atomic operation on counter
+            uint resultIdx;
+            InterlockedAdd(lineCount[0], 1, resultIdx);
+            if (resultIdx < 1000) // Max lines limit
+            {
+                result[resultIdx].x1 = x1;
+                result[resultIdx].y1 = y1;
+                result[resultIdx].x2 = x2;
+                result[resultIdx].y2 = y2;
+            }
+        }
+    }
+} 

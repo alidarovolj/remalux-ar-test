@@ -275,7 +275,7 @@ namespace Remalux.AR
                   if (inputHandlerObject == null)
                   {
                         inputHandlerObject = new GameObject("WallPainterInputHandler");
-                        WallPainterInputHandler handler = inputHandlerObject.AddComponent<WallPainterInputHandler>();
+                        WallPainterInputDebuggerHandler handler = inputHandlerObject.AddComponent<WallPainterInputDebuggerHandler>();
 
                         // Устанавливаем ссылку на WallPainter
                         handler.SetWallPainter(targetComponent);
@@ -329,7 +329,7 @@ namespace Remalux.AR
       }
 
       // Класс для улучшенной обработки ввода
-      public class WallPainterInputHandler : MonoBehaviour
+      public class WallPainterInputDebuggerHandler : MonoBehaviour
       {
             private MonoBehaviour wallPainter;
             private MethodInfo paintWallAtPositionMethod;

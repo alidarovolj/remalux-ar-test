@@ -146,5 +146,11 @@ namespace Remalux.WallPainting.Vision
                         wallDetector.OnWallsDetected -= OnWallsDetected;
                   }
             }
+
+            private void Update()
+            {
+                  // Process any pending actions on the main thread
+                  UnityMainThread.Update();
+            }
       }
 }
