@@ -33,6 +33,25 @@ namespace Remalux.WallPainting
                         return;
                   }
 
+                  // Create a default blue material if no presets exist
+                  if (texturePresets.Count == 0)
+                  {
+                        Material blueMaterial = new Material(Shader.Find("Standard"));
+                        blueMaterial.color = Color.blue;
+
+                        TexturePreset bluePreset = new TexturePreset
+                        {
+                              name = "Default Blue",
+                              material = blueMaterial,
+                              tintColor = Color.blue,
+                              glossiness = 0.5f,
+                              metallic = 0.0f
+                        };
+
+                        texturePresets.Add(bluePreset);
+                        Debug.Log("TextureManager: Created default blue material preset");
+                  }
+
                   if (texturePresets.Count > 0)
                   {
                         ApplyCurrentPreset();
