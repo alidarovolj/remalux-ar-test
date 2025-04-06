@@ -120,24 +120,28 @@ namespace Remalux.WallPainting.Vision
                         {
                               Debug.LogWarning("Camera preview RawImage not assigned, creating a new one");
                               GameObject previewObj = new GameObject("CameraPreview");
-                              RectTransform rectTransform = previewObj.AddComponent<RectTransform>();
-                              cameraPreview = previewObj.AddComponent<RawImage>();
-
-                              // Добавляем к Canvas, если есть
                               Canvas canvas = FindObjectOfType<Canvas>();
                               if (canvas != null)
                               {
                                     previewObj.transform.SetParent(canvas.transform, false);
                               }
+                              RectTransform rectTransform = previewObj.AddComponent<RectTransform>();
+                              cameraPreview = previewObj.AddComponent<RawImage>();
                         }
 
                         // Устанавливаем текстуру камеры в RawImage
                         cameraPreview.texture = webCamTexture;
 
-                        // Устанавливаем режим отображения (начальный)
-                        SetCameraViewMode(false);
+                        // Устанавливаем масштаб по оси Y равным 1 (не переворачиваем камеру вертикально)
+                        if (cameraPreview.rectTransform != null)
+                        {
+                              cameraPreview.rectTransform.localScale = new Vector3(1, 1, 1);
+                        }
 
-                        ShowMessage("Камера инициализирована", 3f);
+                        // Устанавливаем режим отображения на полный экран сразу
+                        SetCameraViewMode(true);
+
+                        ShowMessage("Камера инициализирована и отображается на весь экран", 3f);
                   }
                   catch (System.Exception e)
                   {
@@ -592,9 +596,9 @@ namespace Remalux.WallPainting.Vision
                   mesh.RecalculateBounds();
                   meshFilter.mesh = mesh;
 
-                  // Создаем полупрозрачный материал вместо непрозрачного цветного блока
+                  // Создаем полностью прозрачный материал вместо цветного блока
                   Material wallMaterial = new Material(Shader.Find("Transparent/Diffuse"));
-                  wallMaterial.color = new Color(0.2f, 0.6f, 1.0f, 0.2f); // Голубой полупрозрачный
+                  wallMaterial.color = new Color(1f, 1f, 1f, 0f); // Полностью прозрачный
 
                   // Добавляем обводку контура стены
                   AddWallBorder(marker.transform, 1.0f, 1.0f);
@@ -615,8 +619,7 @@ namespace Remalux.WallPainting.Vision
                   // Добавляем маркеры углов
                   AddEnhancedCornerMarkers(marker.transform, 1.0f, 1.0f);
 
-                  // Добавляем индикатор типа поверхности
-                  AddSurfaceTypeIndicator(marker.transform, true, 1.0f, 1.0f);
+                  // Индикатор типа поверхности не добавляем
 
                   Debug.Log($"Создан маркер поверхности в позиции {wall.position.ToString("F2")}");
 
@@ -975,73 +978,9 @@ namespace Remalux.WallPainting.Vision
             // Метод для добавления индикатора типа поверхности
             private void AddSurfaceTypeIndicator(Transform parentTransform, bool isVirtual, float width, float height)
             {
-                  // Создаем объект для индикатора типа поверхности
-                  GameObject indicatorObj = new GameObject("SurfaceTypeIndicator");
-                  indicatorObj.transform.SetParent(parentTransform);
-
-                  // Размещаем индикатор в верхнем правом углу
-                  float hw = width * 0.5f;
-                  float hh = height * 0.5f;
-                  indicatorObj.transform.localPosition = new Vector3(hw - 0.15f, hh - 0.15f, -0.02f);
-
-                  // Добавляем спрайт
-                  SpriteRenderer spriteRenderer = indicatorObj.AddComponent<SpriteRenderer>();
-
-                  // Создаем текстуру индикатора
-                  Texture2D iconTexture = new Texture2D(64, 64);
-                  Color[] pixels = new Color[64 * 64];
-
-                  // Заполняем текстуру индикатором (круг с иконкой)
-                  for (int y = 0; y < 64; y++)
-                  {
-                        for (int x = 0; x < 64; x++)
-                        {
-                              int index = y * 64 + x;
-
-                              // Рассчитываем расстояние от центра
-                              float dx = x - 32;
-                              float dy = y - 32;
-                              float distance = Mathf.Sqrt(dx * dx + dy * dy);
-
-                              if (distance < 28) // Круг
-                              {
-                                    // Виртуальная поверхность - голубой круг
-                                    pixels[index] = isVirtual ?
-                                          new Color(0.2f, 0.6f, 1.0f, 0.8f) :
-                                          new Color(0.2f, 0.8f, 0.2f, 0.8f);
-
-                                    // Добавляем иконку внутри круга
-                                    if (distance < 18 &&
-                                        (Mathf.Abs(dx) < 8 || Mathf.Abs(dy) < 8) &&
-                                        !(Mathf.Abs(dx) < 8 && Mathf.Abs(dy) < 8))
-                                    {
-                                          pixels[index] = Color.white;
-                                    }
-                              }
-                              else if (distance < 32) // Граница круга
-                              {
-                                    pixels[index] = Color.white;
-                              }
-                              else // Прозрачность вне круга
-                              {
-                                    pixels[index] = Color.clear;
-                              }
-                        }
-                  }
-
-                  iconTexture.SetPixels(pixels);
-                  iconTexture.Apply();
-
-                  // Создаем спрайт, явно указывая UnityEngine.Rect
-                  Sprite iconSprite = Sprite.Create(iconTexture,
-                        new UnityEngine.Rect(0, 0, 64, 64),
-                        new Vector2(0.5f, 0.5f));
-
-                  spriteRenderer.sprite = iconSprite;
-                  spriteRenderer.sortingOrder = 10;
-
-                  // Устанавливаем размер
-                  indicatorObj.transform.localScale = new Vector3(0.2f, 0.2f, 0.2f);
+                  // Не создаём индикатор типа поверхности
+                  // Оранжевый блок убран полностью
+                  return;
             }
 
             private void UpdateUI()
@@ -1083,94 +1022,141 @@ namespace Remalux.WallPainting.Vision
                         CreateTestWalls();
                         lastWallCreationTime = Time.time;
                   }
+
+                  // Обработка ввода для создания тестовых стен
+                  if (Input.GetKeyDown(KeyCode.T))
+                  {
+                        CreateTestWalls();
+                        ShowMessage("Созданы тестовые стены. Используйте мышь для рисования.");
+                  }
+
+                  // Добавляем простой режим рисования
+                  if (Input.GetMouseButton(0) && wallMarkers.Count > 0)
+                  {
+                        // Проверяем, попадает ли луч от мыши в стену
+                        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+                        RaycastHit hit;
+
+                        if (Physics.Raycast(ray, out hit))
+                        {
+                              // Проверяем, это ли наша стена
+                              if (hit.collider.CompareTag("Wall"))
+                              {
+                                    // Создаем позицию для рисования в текстурных координатах
+                                    Vector2 textureCoord = hit.textureCoord;
+                                    GameObject wall = hit.collider.gameObject;
+
+                                    // Рисуем на стене
+                                    PaintOnWall(wall, textureCoord, Color.red);
+                              }
+                        }
+                  }
             }
 
             private float lastWallCreationTime = 0f;
 
             private void CreateTestWalls()
             {
-                  // Создаем тестовые стены перед камерой
-                  List<WallData> testWalls = new List<WallData>();
+                  ClearWallMarkers();
 
-                  // Передняя стена
-                  WallData frontWall = new WallData
+                  // Создаем тестовую стену в центре экрана
+                  Vector3 wallPosition = new Vector3(0, 0, 5);
+
+                  // Создаем маркер с увеличенным размером для легкого взаимодействия
+                  GameObject wallMarker = CreateWallPlane(wallPosition, Quaternion.identity, 4, 3);
+                  if (wallMarker != null)
                   {
-                        position = new Vector3(0, 0, 5f), // 5 метров вперед
-                        rotation = Quaternion.identity,
-                        scale = new Vector3(10f, 5f, 0.1f), // Широкая стена
-                        id = 1
-                  };
-                  testWalls.Add(frontWall);
+                        // Настраиваем материал
+                        MeshRenderer renderer = wallMarker.GetComponent<MeshRenderer>();
+                        if (renderer != null)
+                        {
+                              Material wallMaterial = new Material(Shader.Find("Legacy Shaders/Transparent/Diffuse"));
+                              wallMaterial.color = new Color(1f, 1f, 1f, 0.5f);
+                              renderer.material = wallMaterial;
+                        }
 
-                  // Левая стена
-                  WallData leftWall = new WallData
+                        // Добавляем в список маркеров
+                        wallMarkers.Add(wallMarker);
+
+                        Debug.Log($"Создана тестовая стена в позиции {wallPosition}");
+                  }
+                  else
                   {
-                        position = new Vector3(-5f, 0, 0), // 5 метров влево
-                        rotation = Quaternion.Euler(0, 90, 0), // Повернута на 90 градусов
-                        scale = new Vector3(10f, 5f, 0.1f),
-                        id = 2
-                  };
-                  testWalls.Add(leftWall);
+                        Debug.LogError("Не удалось создать тестовую стену");
+                  }
+            }
 
-                  // Правая стена
-                  WallData rightWall = new WallData
-                  {
-                        position = new Vector3(5f, 0, 0), // 5 метров вправо
-                        rotation = Quaternion.Euler(0, -90, 0), // Повернута на -90 градусов
-                        scale = new Vector3(10f, 5f, 0.1f),
-                        id = 3
-                  };
-                  testWalls.Add(rightWall);
+            private GameObject CreateWallPlane(Vector3 position, Quaternion rotation, float width, float height)
+            {
+                  GameObject wallPlane = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                  wallPlane.transform.position = position;
+                  wallPlane.transform.rotation = rotation;
+                  wallPlane.transform.localScale = new Vector3(width, height, 1);
 
-                  // Добавляем стены через основной обработчик
-                  OnWallsDetected(testWalls);
+                  // Настраиваем слои и теги
+                  wallPlane.layer = LayerMask.NameToLayer("Wall");
+                  wallPlane.tag = "Wall";
 
-                  ShowMessage("Созданы тестовые стены для демонстрации", 3f);
+                  return wallPlane;
             }
 
             private void HandleInput()
             {
-                  // Обработка нажатия пробела для покраски стен
-                  if (Input.GetKeyDown(KeyCode.Space))
+                  // Создаем EventSystem, если он еще не существует
+                  if (EventSystem.current == null)
                   {
-                        Debug.Log("Пробел нажат - красим все стены синим материалом");
-                        PaintAllWalls();
+                        GameObject eventSystemObj = new GameObject("EventSystem");
+                        eventSystemObj.AddComponent<EventSystem>();
+                        eventSystemObj.AddComponent<StandaloneInputModule>();
+                        Debug.Log("Создан новый EventSystem");
                   }
 
-                  // Обработка нажатия F для переключения режима отображения камеры
+                  // Обрабатываем нажатие клавиши F для переключения режима отображения камеры
                   if (Input.GetKeyDown(KeyCode.F))
                   {
-                        Debug.Log("Клавиша F нажата - переключаем режим отображения камеры");
                         ToggleCameraViewMode();
+                        Debug.Log($"Режим камеры переключен на: {(isFullScreenCamera ? "полноэкранный" : "предпросмотр")}");
+                        return; // Возвращаемся, чтобы не обрабатывать другие клики в этом кадре
                   }
 
-                  // Обработка нажатия T для создания тестовых стен
-                  if (Input.GetKeyDown(KeyCode.T))
+                  // Обрабатываем клик мыши только если курсор не находится над UI элементом
+                  if (Input.GetMouseButtonDown(0) && !EventSystem.current.IsPointerOverGameObject())
                   {
-                        Debug.Log("Клавиша T нажата - создаем тестовые стены");
-                        CreateTestWalls();
-                  }
-
-                  // Обработка клика мышкой для покраски конкретной стены
-                  if (Input.GetMouseButtonDown(0))
-                  {
-                        // Проверяем, что EventSystem инициализирован
-                        if (EventSystem.current == null)
+                        // Если мы в режиме захвата, обрабатываем клик
+                        if (isCapturing)
                         {
-                              // Если EventSystem отсутствует, создаем его
-                              GameObject eventSystemObj = new GameObject("EventSystem");
-                              eventSystemObj.AddComponent<EventSystem>();
-                              eventSystemObj.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
-                        }
-
-                        // Проверяем, что курсор не над UI элементом
-                        if (!EventSystem.current.IsPointerOverGameObject())
-                        {
+                              // Получаем позицию мыши на экране
                               Vector2 mousePosition = Input.mousePosition;
-                              PaintWallAtPosition(mousePosition);
 
-                              // Показываем визуальный эффект при клике
+                              // Пытаемся определить, по какой стене был клик
+                              Ray ray = mainCamera.ScreenPointToRay(mousePosition);
+                              RaycastHit hit;
+
+                              // Создаем визуальный эффект клика
                               ShowClickFeedback(mousePosition);
+
+                              // Проверяем, попал ли луч в какой-либо объект
+                              if (Physics.Raycast(ray, out hit))
+                              {
+                                    Debug.Log($"Клик по объекту: {hit.collider.gameObject.name}");
+
+                                    // Если попали в стену
+                                    if (hit.collider.gameObject.layer == LayerMask.NameToLayer("Wall"))
+                                    {
+                                          // Создаем эффект покраски в точке удара
+                                          CreatePaintEffectAtHitPoint(hit.point, hit.normal, GetPaintColor());
+
+                                          // Вызываем событие покраски стены
+                                          if (OnWallPainted != null)
+                                          {
+                                                OnWallPainted(hit.collider.gameObject);
+                                          }
+                                    }
+                              }
+                        }
+                        else
+                        {
+                              Debug.Log("Клик проигнорирован, так как режим захвата не активен");
                         }
                   }
             }
@@ -2059,35 +2045,51 @@ namespace Remalux.WallPainting.Vision
             // Метод для отображения сообщения (с поддержкой разных типов панелей)
             private void ShowMessage(string message, float duration = 3f)
             {
-                  // Просто логируем сообщение, если панель ещё не создана
+                  // Если панель сообщений еще не создана, просто логируем сообщение
                   if (messagePanel == null)
                   {
-                        Debug.Log("Сообщение (панель не создана): " + message);
+                        Debug.Log($"Сообщение (панель не создана): {message}");
                         return;
                   }
 
-                  // Активируем панель
-                  messagePanel.SetActive(true);
-
-                  // Находим текстовый компонент
-                  Text messageText = messagePanel.GetComponentInChildren<Text>();
-                  if (messageText != null)
+                  try
                   {
-                        messageText.text = message;
-                  }
-                  else
-                  {
-                        Debug.LogError("Компонент Text не найден в панели сообщений");
-                  }
+                        // Активируем панель
+                        messagePanel.SetActive(true);
 
-                  // Останавливаем предыдущий корутин, если он был запущен
-                  if (messageCoroutine != null)
-                  {
-                        StopCoroutine(messageCoroutine);
-                  }
+                        // Сначала пробуем найти UI Text компонент
+                        Text uiText = messagePanel.GetComponentInChildren<Text>();
+                        if (uiText != null)
+                        {
+                              uiText.text = message;
+                        }
+                        else
+                        {
+                              // Если UI Text не найден, пробуем найти TextMesh
+                              TextMesh textMesh = messagePanel.GetComponentInChildren<TextMesh>();
+                              if (textMesh != null)
+                              {
+                                    textMesh.text = message;
+                              }
+                              else
+                              {
+                                    Debug.LogWarning($"Не найден компонент для отображения текста: {message}");
+                              }
+                        }
 
-                  // Запускаем корутин для скрытия сообщения через указанное время
-                  messageCoroutine = StartCoroutine(HideMessageAfterDelay(duration));
+                        // Останавливаем предыдущий корутин, если он был запущен
+                        if (messageCoroutine != null)
+                        {
+                              StopCoroutine(messageCoroutine);
+                        }
+
+                        // Запускаем корутин для скрытия сообщения через указанное время
+                        messageCoroutine = StartCoroutine(HideMessageAfterDelay(duration));
+                  }
+                  catch (System.Exception e)
+                  {
+                        Debug.LogError($"Ошибка при отображении сообщения: {e.Message}");
+                  }
             }
 
             // Корутина для скрытия сообщения
@@ -2886,132 +2888,124 @@ namespace Remalux.WallPainting.Vision
                   Debug.Log("Включено отображение контуров на видеопотоке камеры");
             }
 
-            // Метод для установки режима отображения камеры
-            private void SetCameraViewMode(bool fullScreen)
+            // Метод для переключения режима отображения камеры
+            public void SetCameraViewMode(bool fullscreen)
             {
+                  isFullScreenCamera = fullscreen;
+
                   if (cameraPreview == null)
                   {
-                        Debug.Log("Camera preview is null!");
+                        Debug.LogWarning("Camera preview is not available");
                         return;
                   }
-
-                  isFullScreenCamera = fullScreen;
-                  cameraPreview.gameObject.SetActive(true);
 
                   RectTransform rectTransform = cameraPreview.GetComponent<RectTransform>();
                   if (rectTransform == null)
                   {
-                        Debug.Log("Couldn't find RectTransform on camera preview!");
+                        Debug.LogWarning("RectTransform not found on camera preview");
                         return;
                   }
 
-                  if (fullScreen)
+                  // Сохраняем текущий масштаб без изменения
+                  Vector3 currentScale = rectTransform.localScale;
+
+                  if (fullscreen)
                   {
-                        // Полноэкранный режим
+                        // Полноэкранный режим:
+                        // - Размер на весь экран
+                        // - Позиция по центру
+                        // - Более прозрачный для видимости стен
                         rectTransform.anchorMin = Vector2.zero;
                         rectTransform.anchorMax = Vector2.one;
-                        rectTransform.offsetMin = Vector2.zero;
-                        rectTransform.offsetMax = Vector2.zero;
-
-                        // Ставим камеру под другими элементами UI
-                        cameraPreview.transform.SetAsFirstSibling();
-
-                        // Настраиваем полупрозрачность
-                        Color color = cameraPreview.color;
-                        cameraPreview.color = new Color(color.r, color.g, color.b, 0.8f);
+                        rectTransform.sizeDelta = Vector2.zero;
+                        rectTransform.anchoredPosition = Vector2.zero;
+                        cameraPreview.color = new Color(1, 1, 1, 0.7f); // Полупрозрачный для видимости стен
 
                         // Обновляем видимость маркеров стен
                         UpdateWallMarkersVisibility(true);
 
-                        ShowMessage("Полноэкранный режим камеры (F - переключение)", 2f);
+                        ShowMessage("Полноэкранный режим камеры", 1.5f);
                   }
                   else
                   {
-                        // Режим превью в углу
-                        rectTransform.anchorMin = new Vector2(0.8f, 0);
-                        rectTransform.anchorMax = new Vector2(1, 0.2f);
-                        rectTransform.offsetMin = new Vector2(10, 10);
-                        rectTransform.offsetMax = new Vector2(-10, -10);
+                        // Режим предпросмотра:
+                        // - Маленький размер в углу
+                        // - Меньший приоритет отображения
+                        rectTransform.anchorMin = new Vector2(0.7f, 0);
+                        rectTransform.anchorMax = new Vector2(1, 0.3f);
+                        rectTransform.sizeDelta = Vector2.zero;
+                        rectTransform.anchoredPosition = Vector2.zero;
+                        cameraPreview.color = Color.white; // Полная непрозрачность
 
-                        // Восстанавливаем нормальную непрозрачность
-                        Color color = cameraPreview.color;
-                        cameraPreview.color = new Color(color.r, color.g, color.b, 1f);
-
-                        // Обновляем видимость маркеров стен
+                        // Возвращаем нормальную видимость маркеров стен
                         UpdateWallMarkersVisibility(false);
 
-                        ShowMessage("Режим превью камеры (F - переключение)", 2f);
+                        ShowMessage("Режим предпросмотра камеры", 1.5f);
                   }
             }
 
-            // Метод для обновления видимости и яркости маркеров стен в разных режимах
-            private void UpdateWallMarkersVisibility(bool isFullScreenMode)
+            // Метод для обновления видимости маркеров стен в зависимости от режима камеры
+            private void UpdateWallMarkersVisibility(bool fullscreenMode)
             {
-                  if (wallMarkers.Count == 0)
-                  {
-                        return; // Нет стен для обновления
-                  }
+                  if (wallMarkers == null || wallMarkers.Count == 0)
+                        return;
 
-                  // Делаем маркеры стен ярче в полноэкранном режиме
-                  foreach (var marker in wallMarkers)
+                  foreach (GameObject marker in wallMarkers)
                   {
                         if (marker == null) continue;
 
-                        // Обновляем свойства материалов для повышения видимости
-                        Renderer renderer = marker.GetComponent<Renderer>();
-                        if (renderer != null && renderer.material != null)
+                        // Получаем все рендереры в маркере
+                        Renderer[] renderers = marker.GetComponentsInChildren<Renderer>();
+
+                        foreach (Renderer renderer in renderers)
                         {
-                              float alpha = isFullScreenMode ? 0.4f : 0.2f;
-                              Color color = renderer.material.color;
-                              renderer.material.color = new Color(color.r, color.g, color.b, alpha);
+                              if (renderer == null || renderer.material == null) continue;
 
-                              if (renderer.material.HasProperty("_EmissionColor"))
+                              // В полноэкранном режиме делаем маркеры ярче
+                              if (fullscreenMode)
                               {
-                                    renderer.material.EnableKeyword("_EMISSION");
-                                    float intensity = isFullScreenMode ? 2.0f : 1.0f;
-                                    renderer.material.SetColor("_EmissionColor", color * intensity);
-                              }
-                        }
-
-                        // Настраиваем LineRenderer компоненты, если они есть
-                        LineRenderer[] lineRenderers = marker.GetComponentsInChildren<LineRenderer>();
-                        foreach (var line in lineRenderers)
-                        {
-                              if (line == null) continue;
-
-                              if (isFullScreenMode)
-                              {
-                                    line.startWidth = 0.04f;
-                                    line.endWidth = 0.04f;
-                                    line.startColor = Color.white;
-                                    line.endColor = Color.yellow;
+                                    // Увеличиваем яркость и насыщенность материалов
+                                    Color currentColor = renderer.material.color;
+                                    renderer.material.color = new Color(
+                                        Mathf.Min(currentColor.r * 1.5f, 1f),
+                                        Mathf.Min(currentColor.g * 1.5f, 1f),
+                                        Mathf.Min(currentColor.b * 1.5f, 1f),
+                                        currentColor.a
+                                    );
                               }
                               else
                               {
-                                    line.startWidth = 0.02f;
-                                    line.endWidth = 0.02f;
-                                    line.startColor = Color.cyan;
-                                    line.endColor = Color.yellow;
+                                    // Возвращаем нормальную яркость
+                                    Color currentColor = renderer.material.color;
+                                    if (currentColor.r > 0.7f || currentColor.g > 0.7f || currentColor.b > 0.7f)
+                                    {
+                                          renderer.material.color = new Color(
+                                              currentColor.r / 1.5f,
+                                              currentColor.g / 1.5f,
+                                              currentColor.b / 1.5f,
+                                              currentColor.a
+                                          );
+                                    }
                               }
                         }
 
-                        // Настраиваем TextMesh компоненты, если они есть
+                        // Улучшаем видимость текстовых меток
                         TextMesh[] textMeshes = marker.GetComponentsInChildren<TextMesh>();
-                        foreach (var text in textMeshes)
+                        foreach (TextMesh textMesh in textMeshes)
                         {
-                              if (text == null) continue;
+                              if (textMesh == null) continue;
 
-                              if (isFullScreenMode)
+                              if (fullscreenMode)
                               {
-                                    text.characterSize = 0.1f;
-                                    text.color = Color.white;
-                                    text.fontSize = 80;
+                                    // Делаем текст ярче и крупнее в полноэкранном режиме
+                                    textMesh.color = Color.white;
+                                    textMesh.characterSize = 0.15f;
                               }
                               else
                               {
-                                    text.characterSize = 0.05f;
-                                    text.color = Color.yellow;
-                                    text.fontSize = 72;
+                                    // Возвращаем обычный вид в режиме предпросмотра
+                                    textMesh.color = new Color(0.9f, 0.9f, 0.0f);
+                                    textMesh.characterSize = 0.1f;
                               }
                         }
                   }
@@ -3024,129 +3018,184 @@ namespace Remalux.WallPainting.Vision
                   bool newMode = !isFullScreenCamera;
                   SetCameraViewMode(newMode);
             }
-      }
 
-      // Простой компонент для управления камерой в тестовой сцене
-      public class SimpleCameraController : MonoBehaviour
-      {
-            private float moveSpeed = 2.0f;
-            private float rotateSpeed = 120.0f;
-            private bool showInfo = true;
-            private float lastInfoTime = 0;
-
-            void Start()
+            private void PaintOnWall(GameObject wall, Vector2 position, Color color)
             {
-                  // Показываем инструкцию при старте
-                  ShowControlsInfo();
+                  // Получаем или создаем материал для рисования
+                  MeshRenderer renderer = wall.GetComponent<MeshRenderer>();
+                  if (renderer == null) return;
+
+                  // Проверяем, есть ли у стены текстура
+                  Texture2D paintTexture = renderer.material.mainTexture as Texture2D;
+
+                  // Если текстуры нет, создаем новую
+                  if (paintTexture == null)
+                  {
+                        paintTexture = new Texture2D(512, 512, TextureFormat.RGBA32, false);
+                        // Заполняем текстуру прозрачным белым цветом
+                        Color[] colors = new Color[512 * 512];
+                        for (int i = 0; i < colors.Length; i++)
+                        {
+                              colors[i] = new Color(1f, 1f, 1f, 0.1f);
+                        }
+                        paintTexture.SetPixels(colors);
+                        paintTexture.Apply();
+
+                        // Устанавливаем текстуру материалу
+                        renderer.material.mainTexture = paintTexture;
+                  }
+
+                  // Конвертируем позицию из текстурных координат в пиксели
+                  int x = Mathf.FloorToInt(position.x * paintTexture.width);
+                  int y = Mathf.FloorToInt(position.y * paintTexture.height);
+
+                  // Рисуем кружок
+                  int brushSize = 10;
+                  for (int i = -brushSize; i <= brushSize; i++)
+                  {
+                        for (int j = -brushSize; j <= brushSize; j++)
+                        {
+                              int pixelX = x + i;
+                              int pixelY = y + j;
+
+                              // Проверяем, находится ли пиксель в пределах текстуры
+                              if (pixelX >= 0 && pixelX < paintTexture.width && pixelY >= 0 && pixelY < paintTexture.height)
+                              {
+                                    // Проверяем, что пиксель внутри круга кисти
+                                    if (i * i + j * j <= brushSize * brushSize)
+                                    {
+                                          paintTexture.SetPixel(pixelX, pixelY, color);
+                                    }
+                              }
+                        }
+                  }
+
+                  // Применяем изменения
+                  paintTexture.Apply();
             }
 
-            void Update()
+            // Простой компонент для управления камерой в тестовой сцене
+            public class SimpleCameraController : MonoBehaviour
             {
-                  // Обработка перемещения
-                  float horizontal = 0;
-                  float vertical = 0;
+                  private float moveSpeed = 2.0f;
+                  private float rotateSpeed = 120.0f;
+                  private bool showInfo = true;
+                  private float lastInfoTime = 0;
 
-                  if (Input.GetKey(KeyCode.W)) vertical += 1;
-                  if (Input.GetKey(KeyCode.S)) vertical -= 1;
-                  if (Input.GetKey(KeyCode.A)) horizontal -= 1;
-                  if (Input.GetKey(KeyCode.D)) horizontal += 1;
-
-                  float actualMoveSpeed = moveSpeed;
-                  if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                  void Start()
                   {
-                        actualMoveSpeed *= 2.0f; // Ускорение при Shift
-                  }
-
-                  // Перемещаем камеру
-                  Vector3 movement = new Vector3(horizontal, 0, vertical) * actualMoveSpeed * Time.deltaTime;
-                  transform.Translate(movement);
-
-                  // Вертикальное перемещение с Q и E
-                  if (Input.GetKey(KeyCode.Q)) transform.Translate(Vector3.up * actualMoveSpeed * Time.deltaTime);
-                  if (Input.GetKey(KeyCode.E)) transform.Translate(Vector3.down * actualMoveSpeed * Time.deltaTime);
-
-                  // Обработка вращения
-                  float rotateHorizontal = 0;
-                  float rotateVertical = 0;
-
-                  if (Input.GetKey(KeyCode.LeftArrow)) rotateHorizontal -= 1;
-                  if (Input.GetKey(KeyCode.RightArrow)) rotateHorizontal += 1;
-                  if (Input.GetKey(KeyCode.UpArrow)) rotateVertical += 1;
-                  if (Input.GetKey(KeyCode.DownArrow)) rotateVertical -= 1;
-
-                  // Поворачиваем камеру
-                  transform.Rotate(Vector3.up, rotateHorizontal * rotateSpeed * Time.deltaTime);
-                  transform.Rotate(Vector3.right, rotateVertical * rotateSpeed * Time.deltaTime);
-
-                  // Сброс положения по нажатию R
-                  if (Input.GetKeyDown(KeyCode.R))
-                  {
-                        transform.position = new Vector3(0, 1.7f, 0);
-                        transform.rotation = Quaternion.Euler(0, 0, 0);
-                        Debug.Log("Положение камеры сброшено к началу координат");
-                  }
-
-                  // Периодически показываем управление
-                  if (Time.time - lastInfoTime > 30 && showInfo)
-                  {
+                        // Показываем инструкцию при старте
                         ShowControlsInfo();
-                        lastInfoTime = Time.time;
                   }
-            }
 
-            private void ShowControlsInfo()
-            {
-                  // Отображаем инструкцию в верхнем левом углу
-                  GameObject infoObj = new GameObject("ControlsInfo");
-                  infoObj.transform.SetParent(transform);
+                  void Update()
+                  {
+                        // Обработка перемещения
+                        float horizontal = 0;
+                        float vertical = 0;
 
-                  // Создаем Canvas
-                  Canvas canvas = infoObj.AddComponent<Canvas>();
-                  canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                  infoObj.AddComponent<CanvasScaler>();
-                  infoObj.AddComponent<GraphicRaycaster>();
+                        if (Input.GetKey(KeyCode.W)) vertical += 1;
+                        if (Input.GetKey(KeyCode.S)) vertical -= 1;
+                        if (Input.GetKey(KeyCode.A)) horizontal -= 1;
+                        if (Input.GetKey(KeyCode.D)) horizontal += 1;
 
-                  // Создаем панель с инструкцией
-                  GameObject panel = new GameObject("InfoPanel");
-                  panel.transform.SetParent(canvas.transform, false);
+                        float actualMoveSpeed = moveSpeed;
+                        if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                        {
+                              actualMoveSpeed *= 2.0f; // Ускорение при Shift
+                        }
 
-                  // Добавляем фон
-                  Image bgImage = panel.AddComponent<Image>();
-                  bgImage.color = new Color(0, 0, 0, 0.7f);
+                        // Перемещаем камеру
+                        Vector3 movement = new Vector3(horizontal, 0, vertical) * actualMoveSpeed * Time.deltaTime;
+                        transform.Translate(movement);
 
-                  // Настраиваем размер и позицию
-                  RectTransform panelRect = bgImage.rectTransform;
-                  panelRect.anchorMin = new Vector2(0, 0.85f);
-                  panelRect.anchorMax = new Vector2(0.3f, 1);
-                  panelRect.offsetMin = Vector2.zero;
-                  panelRect.offsetMax = Vector2.zero;
+                        // Вертикальное перемещение с Q и E
+                        if (Input.GetKey(KeyCode.Q)) transform.Translate(Vector3.up * actualMoveSpeed * Time.deltaTime);
+                        if (Input.GetKey(KeyCode.E)) transform.Translate(Vector3.down * actualMoveSpeed * Time.deltaTime);
 
-                  // Создаем текст инструкции
-                  GameObject textObj = new GameObject("InfoText");
-                  textObj.transform.SetParent(panel.transform, false);
+                        // Обработка вращения
+                        float rotateHorizontal = 0;
+                        float rotateVertical = 0;
 
-                  Text infoText = textObj.AddComponent<Text>();
-                  infoText.text =
-                        "УПРАВЛЕНИЕ КАМЕРОЙ:\n" +
-                        "WASD - перемещение\n" +
-                        "Q/E - вверх/вниз\n" +
-                        "Стрелки - поворот\n" +
-                        "Shift - ускорение\n" +
-                        "R - сброс позиции";
+                        if (Input.GetKey(KeyCode.LeftArrow)) rotateHorizontal -= 1;
+                        if (Input.GetKey(KeyCode.RightArrow)) rotateHorizontal += 1;
+                        if (Input.GetKey(KeyCode.UpArrow)) rotateVertical += 1;
+                        if (Input.GetKey(KeyCode.DownArrow)) rotateVertical -= 1;
 
-                  infoText.color = Color.white;
-                  infoText.fontSize = 16;
-                  infoText.fontStyle = FontStyle.Bold;
+                        // Поворачиваем камеру
+                        transform.Rotate(Vector3.up, rotateHorizontal * rotateSpeed * Time.deltaTime);
+                        transform.Rotate(Vector3.right, rotateVertical * rotateSpeed * Time.deltaTime);
 
-                  // Настраиваем размер и позицию текста
-                  RectTransform textRect = infoText.rectTransform;
-                  textRect.anchorMin = Vector2.zero;
-                  textRect.anchorMax = Vector2.one;
-                  textRect.offsetMin = new Vector2(10, 5);
-                  textRect.offsetMax = new Vector2(-10, -5);
+                        // Сброс положения по нажатию R
+                        if (Input.GetKeyDown(KeyCode.R))
+                        {
+                              transform.position = new Vector3(0, 1.7f, 0);
+                              transform.rotation = Quaternion.Euler(0, 0, 0);
+                              Debug.Log("Положение камеры сброшено к началу координат");
+                        }
 
-                  // Автоматическое уничтожение через 10 секунд
-                  Destroy(infoObj, 10f);
+                        // Периодически показываем управление
+                        if (Time.time - lastInfoTime > 30 && showInfo)
+                        {
+                              ShowControlsInfo();
+                              lastInfoTime = Time.time;
+                        }
+                  }
+
+                  private void ShowControlsInfo()
+                  {
+                        // Отображаем инструкцию в верхнем левом углу
+                        GameObject infoObj = new GameObject("ControlsInfo");
+                        infoObj.transform.SetParent(transform);
+
+                        // Создаем Canvas
+                        Canvas canvas = infoObj.AddComponent<Canvas>();
+                        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                        infoObj.AddComponent<CanvasScaler>();
+                        infoObj.AddComponent<GraphicRaycaster>();
+
+                        // Создаем панель с инструкцией
+                        GameObject panel = new GameObject("InfoPanel");
+                        panel.transform.SetParent(canvas.transform, false);
+
+                        // Добавляем фон
+                        Image bgImage = panel.AddComponent<Image>();
+                        bgImage.color = new Color(0, 0, 0, 0.7f);
+
+                        // Настраиваем размер и позицию
+                        RectTransform panelRect = bgImage.rectTransform;
+                        panelRect.anchorMin = new Vector2(0, 0.85f);
+                        panelRect.anchorMax = new Vector2(0.3f, 1);
+                        panelRect.offsetMin = Vector2.zero;
+                        panelRect.offsetMax = Vector2.zero;
+
+                        // Создаем текст инструкции
+                        GameObject textObj = new GameObject("InfoText");
+                        textObj.transform.SetParent(panel.transform, false);
+
+                        Text infoText = textObj.AddComponent<Text>();
+                        infoText.text =
+                              "УПРАВЛЕНИЕ КАМЕРОЙ:\n" +
+                              "WASD - перемещение\n" +
+                              "Q/E - вверх/вниз\n" +
+                              "Стрелки - поворот\n" +
+                              "Shift - ускорение\n" +
+                              "R - сброс позиции";
+
+                        infoText.color = Color.white;
+                        infoText.fontSize = 16;
+                        infoText.fontStyle = FontStyle.Bold;
+
+                        // Настраиваем размер и позицию текста
+                        RectTransform textRect = infoText.rectTransform;
+                        textRect.anchorMin = Vector2.zero;
+                        textRect.anchorMax = Vector2.one;
+                        textRect.offsetMin = new Vector2(10, 5);
+                        textRect.offsetMax = new Vector2(-10, -5);
+
+                        // Автоматическое уничтожение через 10 секунд
+                        Destroy(infoObj, 10f);
+                  }
             }
       }
 }

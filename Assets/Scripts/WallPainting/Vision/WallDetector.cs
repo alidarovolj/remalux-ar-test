@@ -98,9 +98,15 @@ namespace Remalux.WallPainting.Vision
             private object debugMatLock = new object(); // Для безопасного доступа к debugMat
             private bool debugMatUpdated = false; // Флаг обновления отладочного изображения
 
+            private bool isCameraInitialized = false;
+            private int framesToSkip = 0;
+
             private void Start()
             {
                   Debug.Log("WallDetector.Start()");
+
+                  // Remove any existing debug panels from OpenCVForUnity
+                  OpenCVForUnity.UnityUtils.DebugMatUtils.clear();
 
                   // Находим основную камеру, если она не задана
                   if (mainCamera == null)
@@ -291,18 +297,44 @@ namespace Remalux.WallPainting.Vision
                         yield break;
                   }
 
-                  // Set initial texture for debug display
+                  // Setup debug image display with the webcam texture
                   if (debugImageDisplay != null)
                   {
                         debugImageDisplay.texture = webCamTexture;
-                        // Fix image orientation
-                        debugImageDisplay.rectTransform.localRotation = Quaternion.Euler(0, 0, -webCamTexture.videoRotationAngle);
+                        debugImageDisplay.material.mainTexture = webCamTexture;
+
+                        // Make the RawImage full screen and correct orientation
+                        debugImageDisplay.rectTransform.anchorMin = new Vector2(0, 0);
+                        debugImageDisplay.rectTransform.anchorMax = new Vector2(1, 1);
+                        debugImageDisplay.rectTransform.sizeDelta = Vector2.zero;
+                        debugImageDisplay.rectTransform.anchoredPosition = Vector2.zero;
+
+                        // Fix camera orientation based on the webcam rotation
+                        int rotationAngle = webCamTexture.videoRotationAngle;
+                        debugImageDisplay.rectTransform.localRotation = Quaternion.Euler(0, 0, -rotationAngle);
+
+                        // Fix vertical inversion - invert y-scale for mobile devices which often have inverted camera
+                        bool needsVerticalFlip = true; // Default to true for mobile devices
                         debugImageDisplay.rectTransform.localScale = new Vector3(
-                              webCamTexture.videoVerticallyMirrored ? -1 : 1,
-                              1,
-                              1
+                            1,
+                            needsVerticalFlip ? -1 : 1,
+                            1
                         );
-                        Debug.Log("Debug image display set with webcam texture");
+
+                        // Apply proper UV rect for WebCamTexture
+                        if (webCamTexture.videoVerticallyMirrored)
+                        {
+                              debugImageDisplay.uvRect = new UnityEngine.Rect(0, 1, 1, -1);
+                        }
+                        else
+                        {
+                              debugImageDisplay.uvRect = new UnityEngine.Rect(0, 0, 1, 1);
+                        }
+
+                        // Clear any OpenCV debug panels
+                        OpenCVForUnity.UnityUtils.DebugMatUtils.clear();
+
+                        Debug.Log("Debug image display set with webcam texture and made fullscreen");
                   }
 
                   // Initialize OpenCV Mats with correct size
@@ -343,7 +375,25 @@ namespace Remalux.WallPainting.Vision
 
             private void Update()
             {
-                  if (!isInitialized) return;
+                  // Clear any OpenCV debug panels periodically
+                  if (Time.frameCount % 60 == 0)
+                  {
+                        OpenCVForUnity.UnityUtils.DebugMatUtils.clear();
+                  }
+
+                  // Show the current FPS and processing time in debug logs periodically
+                  if (Time.frameCount % 180 == 0)
+                  {
+                        float fps = 1.0f / Time.smoothDeltaTime;
+                        Debug.Log($"FPS: {fps:F1}, Processing time: {lastProcessingTime:F1}ms");
+                  }
+
+                  // Check if the camera is initialized
+                  if (!isCameraInitialized && webCamTexture != null && webCamTexture.isPlaying && webCamTexture.width > 100)
+                  {
+                        isCameraInitialized = true;
+                        framesToSkip = 20; // Skip a few frames to stabilize the camera after startup
+                  }
 
                   // Update the FPS counter
                   frameCount++;
@@ -357,10 +407,17 @@ namespace Remalux.WallPainting.Vision
                         nextFpsUpdate = timeNow + FPS_UPDATE_INTERVAL;
                   }
 
-                  // Log performance stats when needed
-                  if (showPerformanceStats && Time.frameCount % 100 == 0)
+                  // Skip if not initialized or not detecting
+                  if (!isInitialized || !isDetecting || webCamTexture == null || !webCamTexture.isPlaying)
                   {
-                        Debug.Log($"FPS: {currentFPS:F1}, Processing time: {processingTime:F1}ms");
+                        return;
+                  }
+
+                  // Skip frames if needed to stabilize camera
+                  if (framesToSkip > 0)
+                  {
+                        framesToSkip--;
+                        return;
                   }
 
                   // Обработка найденных 2D контуров и преобразование их в 3D стены
@@ -384,32 +441,40 @@ namespace Remalux.WallPainting.Vision
                   }
 
                   // Process frames at regular intervals or when we explicitly have a new frame
-                  if (isDetecting && !isProcessing && webCamTexture != null && webCamTexture.didUpdateThisFrame)
+                  if (!isProcessing && webCamTexture != null && webCamTexture.didUpdateThisFrame)
                   {
                         float timeSinceLastProcess = Time.realtimeSinceStartup - lastProcessingTime;
                         if (timeSinceLastProcess >= processingInterval)
                         {
-                              // Захват данных текстуры в основном потоке
-                              CaptureTextureDataOnMainThread();
-
-                              // Capture and process the current frame
-                              isProcessing = true;
-                              lastProcessingTime = Time.realtimeSinceStartup;
-
-                              // Process frame on a background thread to avoid freezing the main thread
-                              System.Threading.ThreadPool.QueueUserWorkItem((_) =>
+                              try
                               {
-                                    try
+                                    // Захват данных текстуры в основном потоке
+                                    CaptureTextureDataOnMainThread();
+
+                                    // Capture and process the current frame
+                                    isProcessing = true;
+                                    lastProcessingTime = Time.realtimeSinceStartup;
+
+                                    // Process frame on a background thread to avoid freezing the main thread
+                                    System.Threading.ThreadPool.QueueUserWorkItem((_) =>
                                     {
-                                          Process2DDataAsync();
-                                          isProcessing = false;
-                                    }
-                                    catch (System.Exception e)
-                                    {
-                                          Debug.LogError($"Error processing frame: {e.Message}");
-                                          isProcessing = false;
-                                    }
-                              });
+                                          try
+                                          {
+                                                Process2DDataAsync();
+                                                isProcessing = false;
+                                          }
+                                          catch (System.Exception e)
+                                          {
+                                                Debug.LogError($"Error processing frame: {e.Message}");
+                                                isProcessing = false;
+                                          }
+                                    });
+                              }
+                              catch (System.Exception e)
+                              {
+                                    Debug.LogError($"Error capturing frame data: {e.Message}");
+                                    isProcessing = false;
+                              }
                         }
                   }
             }
@@ -441,65 +506,17 @@ namespace Remalux.WallPainting.Vision
             // Метод для обработки 2D данных (запускается в фоновом потоке)
             private void Process2DDataAsync()
             {
-                  if (!isInitialized || !newFrameReady) return;
-
-                  Stopwatch stopwatch = new Stopwatch();
-                  stopwatch.Start();
-
                   try
                   {
-                        // Resize for processing if needed
-                        if (useProcessingResolution)
-                        {
-                              Imgproc.resize(inputMat, resizedMat, new Size(processingResolution.x, processingResolution.y));
-                              // Копируем resizedMat в workingMat для дальнейшей обработки
-                              resizedMat.copyTo(workingMat);
-                        }
-                        else
-                        {
-                              // Используем исходное изображение
-                              inputMat.copyTo(workingMat);
-                        }
+                        if (!newFrameReady || inputMat == null) return;
 
-                        // Улучшаем видимость контуров увеличением контраста
-                        Core.convertScaleAbs(workingMat, workingMat, 1.2, 5);
-
-                        // Convert to grayscale for processing
-                        Imgproc.cvtColor(workingMat, processedMat, Imgproc.COLOR_RGBA2GRAY);
-
-                        // Применяем размытие для уменьшения шума перед обнаружением границ
-                        Imgproc.GaussianBlur(processedMat, processedMat, new Size(3, 3), 1.0);
-
-                        // Улучшаем контраст изображения перед детекцией краев
-                        Imgproc.equalizeHist(processedMat, processedMat);
-
-                        // Адаптивный порог для улучшения выделения контуров
-                        Mat binaryMat = new Mat();
-                        Imgproc.adaptiveThreshold(processedMat, binaryMat, 255,
-                            Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
-                            Imgproc.THRESH_BINARY_INV, 11, 2);
-
-                        // Комбинируем адаптивный порог с Canny для лучших результатов
-                        Imgproc.Canny(processedMat, processedMat, cannyThreshold1, cannyThreshold2);
-                        Core.bitwise_or(processedMat, binaryMat, processedMat);
-
-                        // Улучшаем границы с помощью морфологических операций
-                        Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
-                        Imgproc.dilate(processedMat, processedMat, kernel);
-                        // Добавляем закрытие для соединения близких контуров
-                        Imgproc.morphologyEx(processedMat, processedMat, Imgproc.MORPH_CLOSE, kernel, new Point(-1, -1), 2);
-
-                        // Находим контуры - это будут потенциальные стены
-                        List<MatOfPoint> contours = new List<MatOfPoint>();
-                        Mat hierarchy = new Mat();
-                        Imgproc.findContours(processedMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+                        // Create a stopwatch to measure processing time
+                        Stopwatch stopwatch = Stopwatch.StartNew();
 
                         // Создаем копию исходного изображения для отображения результатов
                         inputMat.copyTo(debugMat);
 
-                        // Добавляем полупрозрачный оверлей для эффекта сканирования
-                        Mat overlay = new Mat(debugMat.size(), debugMat.type(), new Scalar(50, 50, 0, 50));
-                        Core.addWeighted(debugMat, 0.7, overlay, 0.3, 0, debugMat);
+                        // REMOVED: No orange overlay for scanning effect
 
                         // Добавляем сетку для эффекта сканирования - используем системное время вместо Unity Time
                         float currentTime = (float)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
@@ -529,9 +546,49 @@ namespace Remalux.WallPainting.Vision
                         List<WallContourData> wallContours = new List<WallContourData>();
                         int wallCount = 0; // Счетчик обнаруженных стен для нумерации
 
-                        foreach (MatOfPoint contour in contours)
+                        // Create a grayscale image for contour detection
+                        Mat grayMat = new Mat();
+                        Imgproc.cvtColor(inputMat, grayMat, Imgproc.COLOR_RGBA2GRAY);
+
+                        // Apply Gaussian blur to reduce noise
+                        Imgproc.GaussianBlur(grayMat, grayMat, new Size(5, 5), 0);
+
+                        // Apply Canny edge detection
+                        Mat edgeMat = new Mat();
+                        Imgproc.Canny(grayMat, edgeMat, cannyThreshold1, cannyThreshold2);
+
+                        // Apply morphological operations to close gaps
+                        Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
+                        Imgproc.morphologyEx(edgeMat, edgeMat, Imgproc.MORPH_CLOSE, kernel);
+
+                        // Important: Make sure we have a proper binary image for contour detection
+                        // Threshold the image to ensure it's binary (0 or 255)
+                        Mat binaryMat = new Mat();
+                        Imgproc.threshold(edgeMat, binaryMat, 1, 255, Imgproc.THRESH_BINARY);
+
+                        // Ensure we have an 8-bit single channel matrix
+                        if (binaryMat.channels() > 1)
                         {
-                              // Фильтруем маленькие контуры
+                              Mat tmp = new Mat();
+                              Imgproc.cvtColor(binaryMat, tmp, Imgproc.COLOR_RGBA2GRAY);
+                              binaryMat.release();
+                              binaryMat = tmp;
+                        }
+
+                        // Находим контуры - это будут потенциальные стены
+                        List<MatOfPoint> contours = new List<MatOfPoint>();
+                        Mat hierarchy = new Mat();
+                        // Use the PROPERLY prepared binary matrix for contour detection
+                        Imgproc.findContours(binaryMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+
+                        // Draw edges on debug image for visualization
+                        Imgproc.cvtColor(binaryMat, edgeMat, Imgproc.COLOR_GRAY2RGBA);
+                        OpenCVForUnity.CoreModule.Core.addWeighted(debugMat, 0.7, edgeMat, 0.3, 0, debugMat);
+
+                        // Проходим по всем обработанным контурам и рисуем на них информацию
+                        for (int i = 0; i < contours.Count; i++)
+                        {
+                              MatOfPoint contour = contours[i];
                               double area = Imgproc.contourArea(contour);
                               if (area < 200) continue; // Еще меньше минимальная площадь
 
@@ -629,16 +686,6 @@ namespace Remalux.WallPainting.Vision
                             1
                         );
 
-                        // Освобождаем память
-                        binaryMat.release();
-                        kernel.release();
-                        hierarchy.release();
-                        overlay.release();
-                        foreach (var contour in contours)
-                        {
-                              contour.release();
-                        }
-
                         // Сохраняем данные для последующей обработки в основном потоке
                         lock (detectedWallsLock)
                         {
@@ -667,7 +714,7 @@ namespace Remalux.WallPainting.Vision
                         }
 
                         // Задаем время обработки для отображения в статистике
-                        processingTime = stopwatch.ElapsedMilliseconds;
+                        processingTime = (float)Stopwatch.GetTimestamp() / Stopwatch.Frequency - currentTime;
 
                         // Сигнализируем, что новый кадр готов для отображения
                         lock (contoursLock)
@@ -681,6 +728,13 @@ namespace Remalux.WallPainting.Vision
                         {
                               debugMatUpdated = true;
                         }
+
+                        // Cleanup temporary Mats to avoid memory leaks
+                        grayMat.release();
+                        edgeMat.release();
+                        kernel.release();
+                        hierarchy.release();
+                        binaryMat.release();
                   }
                   catch (System.Exception e)
                   {
@@ -743,9 +797,23 @@ namespace Remalux.WallPainting.Vision
                                     }
                                     debugTexture = new Texture2D(debugMat.cols(), debugMat.rows(), TextureFormat.RGBA32, false);
                               }
-                              Utils.matToTexture2D(debugMat, debugTexture, false);
+
+                              // Преобразовать Mat в текстуру
+                              Utils.matToTexture2D(debugMat, debugTexture, webCamTexture.videoVerticallyMirrored);
                               debugTexture.Apply();
+
+                              // Обновление текстуры на UI
                               debugImageDisplay.texture = debugTexture;
+
+                              // Проверить и обновить UV-координаты при необходимости
+                              if (webCamTexture.videoVerticallyMirrored)
+                              {
+                                    debugImageDisplay.uvRect = new UnityEngine.Rect(0, 1, 1, -1);
+                              }
+                              else
+                              {
+                                    debugImageDisplay.uvRect = new UnityEngine.Rect(0, 0, 1, 1);
+                              }
                         }
                         catch (System.Exception e)
                         {
@@ -1007,8 +1075,16 @@ namespace Remalux.WallPainting.Vision
                         float normalizedCenterX = wallContour.center.x / imageWidth;
                         float normalizedCenterY = wallContour.center.y / imageHeight;
 
+                        // Учитываем перевернутость камеры при создании луча
+                        // Если камера отображается перевернутой, то и координаты центра контура нужно перевернуть
+                        if (webCamTexture.videoVerticallyMirrored)
+                        {
+                              normalizedCenterY = 1 - normalizedCenterY;
+                        }
+
                         // Создаем луч из центра камеры в направлении контура
-                        Ray ray = mainCamera.ViewportPointToRay(new Vector3(normalizedCenterX, 1 - normalizedCenterY, 0));
+                        // Инвертируем Y для правильной проекции в мировые координаты
+                        Ray ray = mainCamera.ViewportPointToRay(new Vector3(normalizedCenterX, normalizedCenterY, 0));
 
                         // Определяем позицию и размеры стены
                         Vector3 position;
