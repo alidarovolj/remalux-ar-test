@@ -11,5 +11,5 @@ AssetOrigin:
   productId: 21088
   packageName: OpenCV for Unity
   packageVersion: 2.6.5
-  assetPath: Assets/OpenCVForUnity/StreamingAssets/OpenCVForUnity/768x576_mjpeg.mjpeg
+  assetPath: Assets/StreamingAssets/OpenCVForUnity/768x576_mjpeg.mjpeg
   uploadId: 719270

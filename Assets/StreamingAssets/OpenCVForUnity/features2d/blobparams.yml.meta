@@ -11,5 +11,5 @@ AssetOrigin:
   productId: 21088
   packageName: OpenCV for Unity
   packageVersion: 2.6.5
-  assetPath: Assets/OpenCVForUnity/StreamingAssets/OpenCVForUnity/features2d/blobparams.yml
+  assetPath: Assets/StreamingAssets/OpenCVForUnity/features2d/blobparams.yml
   uploadId: 719270

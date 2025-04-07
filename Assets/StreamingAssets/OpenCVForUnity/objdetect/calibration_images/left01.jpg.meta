@@ -60,5 +60,5 @@ AssetOrigin:
   productId: 21088
   packageName: OpenCV for Unity
   packageVersion: 2.6.5
-  assetPath: Assets/OpenCVForUnity/StreamingAssets/OpenCVForUnity/objdetect/calibration_images/left01.jpg
+  assetPath: Assets/StreamingAssets/OpenCVForUnity/objdetect/calibration_images/left01.jpg
   uploadId: 719270

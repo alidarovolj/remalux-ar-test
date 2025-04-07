@@ -11,5 +11,5 @@ AssetOrigin:
   productId: 21088
   packageName: OpenCV for Unity
   packageVersion: 2.6.5
-  assetPath: Assets/OpenCVForUnity/StreamingAssets/OpenCVForUnity/text/OCRHMM_knn_model_data.xml.gz
+  assetPath: Assets/StreamingAssets/OpenCVForUnity/text/OCRHMM_knn_model_data.xml.gz
   uploadId: 719270

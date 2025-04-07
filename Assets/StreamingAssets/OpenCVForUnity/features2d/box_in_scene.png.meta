@@ -10,5 +10,5 @@ AssetOrigin:
   productId: 21088
   packageName: OpenCV for Unity
   packageVersion: 2.6.5
-  assetPath: Assets/OpenCVForUnity/StreamingAssets/OpenCVForUnity/features2d/box_in_scene.png
+  assetPath: Assets/StreamingAssets/OpenCVForUnity/features2d/box_in_scene.png
   uploadId: 719270

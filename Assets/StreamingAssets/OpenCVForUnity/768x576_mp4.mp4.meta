@@ -1,15 +1,8 @@
 fileFormatVersion: 2
 guid: 81436616d0fc2f049be95e38ce3ba443
-AssetOrigin:
-  serializedVersion: 1
-  productId: 21088
-  packageName: OpenCV for Unity
-  packageVersion: 2.6.5
-  assetPath: Assets/OpenCVForUnity/StreamingAssets/OpenCVForUnity/768x576_mp4.mp4
-  uploadId: 719270
 VideoClipImporter:
   externalObjects: {}
-  serializedVersion: 3
+  serializedVersion: 2
   frameRange: 0
   startFrame: -1
   endFrame: -1
@@ -23,3 +16,10 @@ VideoClipImporter:
   userData: 
   assetBundleName: 
   assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 21088
+  packageName: OpenCV for Unity
+  packageVersion: 2.6.5
+  assetPath: Assets/StreamingAssets/OpenCVForUnity/768x576_mp4.mp4
+  uploadId: 719270

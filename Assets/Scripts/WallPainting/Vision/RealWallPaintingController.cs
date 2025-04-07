@@ -23,8 +23,35 @@ namespace Remalux.WallPainting.Vision
             public RawImage cameraPreview;
             public Button captureButton;
             public Button resetButton;
+            public Button toggleModeButton;
+
+            [Header("Painting")]
+            public GameObject colorPalettePrefab;
+            public Transform colorPaletteContainer;
+            public List<Color> duluxColors = new List<Color>
+                  {
+                        new Color(0.96f, 0.96f, 0.96f), // White
+                        new Color(0.95f, 0.95f, 0.70f), // Cream
+                        new Color(0.85f, 0.85f, 0.85f), // Light Grey
+                        new Color(0.90f, 0.80f, 0.70f), // Beige
+                        new Color(0.95f, 0.75f, 0.55f), // Peach
+                        new Color(0.98f, 0.83f, 0.80f), // Pink
+                        new Color(0.70f, 0.90f, 0.95f), // Sky Blue
+                        new Color(0.60f, 0.80f, 0.60f), // Mint Green
+                        new Color(0.80f, 0.60f, 0.80f), // Lavender
+                        new Color(1.00f, 0.85f, 0.40f), // Yellow
+                        new Color(0.95f, 0.55f, 0.40f), // Coral
+                        new Color(0.40f, 0.65f, 0.85f), // Blue
+                        new Color(0.45f, 0.75f, 0.45f), // Green
+                        new Color(0.70f, 0.45f, 0.45f), // Burgundy
+                        new Color(0.50f, 0.50f, 0.50f), // Grey
+                        new Color(0.30f, 0.30f, 0.30f), // Dark Grey
+                  };
+            private Color currentPaintColor;
+            private GameObject colorPalettePanel;
 
             private bool isCapturing = false;
+            private bool isPaintingMode = false; // Flag to track current mode
             private List<WallData> detectedWalls = new List<WallData>();
             private Material blueMaterial;
             private GameObject messagePanel; // Панель для сообщений
@@ -36,28 +63,194 @@ namespace Remalux.WallPainting.Vision
             private List<GameObject> wallMarkers = new List<GameObject>();
             private List<GameObject> createdWallObjects = new List<GameObject>();
 
-            private void Start()
-            {
-                  Debug.Log("RealWallPaintingController.Start()");
+            private GameObject highlightedWall = null;
+            private Material highlightMaterial;
 
-                  // Проверяем, что EventSystem существует
-                  if (EventSystem.current == null)
+            // Additional fields for painting functionality
+            private GameObject brushSizeContainer; // Контейнер для кнопок размера кисти
+            private Color selectedColor; // Выбранный цвет для покраски
+            private Dictionary<int, Texture2D> wallPaintTextures = new Dictionary<int, Texture2D>(); // Текстуры для стен
+            private Dictionary<GameObject, Material> originalMaterials = new Dictionary<GameObject, Material>(); // Оригинальные материалы
+            private GameObject brushPreview; // Объект для предпросмотра размера кисти
+            private System.Action<GameObject> OnWallPainted; // Событие при окрашивании стены
+
+            // Paint parameters
+            private float brushSize = 0.1f; // Размер кисти по умолчанию
+            private float paintOpacity = 0.8f; // Непрозрачность покраски
+            private float maxPaintDistance = 5.0f; // Максимальное расстояние для покраски
+            private float maxPaintAngle = 60.0f; // Максимальный угол для покраски
+            private float paintInterval = 0.05f; // Интервал между покрасками
+
+            // Camera stability tracking
+            private float cameraStabilityPositionThreshold = 0.01f; // Порог стабильности позиции
+            private float cameraStabilityRotationThreshold = 1.0f; // Порог стабильности поворота
+            private Vector3 lastCameraPosition; // Последняя позиция камеры
+            private Quaternion lastCameraRotation; // Последний поворот камеры
+
+            // State control variables
+            private bool isPaintMode = false; // Флаг режима покраски
+            private bool isColorSelectionMode = false; // Флаг выбора цвета
+            private bool paintingEnabled = false; // Флаг включения покраски
+
+            // Класс для создания Billboard объектов, которые всегда поворачиваются к камере
+            private class Billboard : MonoBehaviour
+            {
+                  private Camera mainCamera;
+
+                  void Start()
                   {
-                        Debug.Log("Creating EventSystem");
-                        GameObject eventSystem = new GameObject("EventSystem");
-                        eventSystem.AddComponent<EventSystem>();
-                        eventSystem.AddComponent<StandaloneInputModule>();
+                        mainCamera = Camera.main;
+                        if (mainCamera == null)
+                        {
+                              mainCamera = FindObjectOfType<Camera>();
+                        }
                   }
 
-                  // Создаем панели для сообщений
-                  CreateMessagePanel();
+                  void Update()
+                  {
+                        if (mainCamera != null)
+                        {
+                              transform.LookAt(transform.position + mainCamera.transform.rotation * Vector3.forward,
+                                              mainCamera.transform.rotation * Vector3.up);
+                        }
+                  }
+            }
 
-                  // Создаем панель помощи
-                  CreateHelpPanel();
+            // Метод для отображения сообщений пользователю
+            private void ShowMessage(string message, float duration = 3f)
+            {
+                  Debug.Log($"Showing message: {message}");
 
-                  // Инициализируем материал по умолчанию
-                  blueMaterial = new Material(Shader.Find("Standard"));
-                  blueMaterial.color = Color.blue;
+                  // Create message panel if it doesn't exist
+                  if (messagePanel == null)
+                  {
+                        CreateMessagePanel();
+                  }
+
+                  // Update the message text
+                  Text messageText = messagePanel.GetComponentInChildren<Text>();
+                  if (messageText != null)
+                  {
+                        messageText.text = message;
+                  }
+
+                  // Show the panel
+                  messagePanel.SetActive(true);
+
+                  // Hide after delay
+                  if (messageCoroutine != null)
+                  {
+                        StopCoroutine(messageCoroutine);
+                  }
+
+                  messageCoroutine = StartCoroutine(HideMessageAfterDelay(duration));
+            }
+
+            // Создание панели сообщений
+            private void CreateMessagePanel()
+            {
+                  // Create a new UI panel for messages
+                  messagePanel = new GameObject("MessagePanel");
+
+                  // Find canvas or create one
+                  Canvas canvas = FindObjectOfType<Canvas>();
+                  if (canvas == null)
+                  {
+                        GameObject canvasObj = new GameObject("Canvas");
+                        canvas = canvasObj.AddComponent<Canvas>();
+                        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                        canvasObj.AddComponent<CanvasScaler>();
+                        canvasObj.AddComponent<GraphicRaycaster>();
+                  }
+
+                  messagePanel.transform.SetParent(canvas.transform, false);
+
+                  // Add panel components
+                  RectTransform rectTransform = messagePanel.AddComponent<RectTransform>();
+                  Image panelImage = messagePanel.AddComponent<Image>();
+                  panelImage.color = new Color(0.1f, 0.1f, 0.1f, 0.8f);
+
+                  // Configure panel layout
+                  rectTransform.anchorMin = new Vector2(0.3f, 0.05f);
+                  rectTransform.anchorMax = new Vector2(0.7f, 0.15f);
+                  rectTransform.offsetMin = Vector2.zero;
+                  rectTransform.offsetMax = Vector2.zero;
+
+                  // Add text to the panel
+                  GameObject textObj = new GameObject("MessageText");
+                  textObj.transform.SetParent(messagePanel.transform, false);
+
+                  Text text = textObj.AddComponent<Text>();
+                  text.text = "";
+                  text.fontSize = 24;
+                  text.alignment = TextAnchor.MiddleCenter;
+                  text.color = Color.white;
+
+                  // Find a font
+                  Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                  if (font == null)
+                  {
+                        Font[] fonts = Resources.FindObjectsOfTypeAll<Font>();
+                        if (fonts.Length > 0)
+                        {
+                              font = fonts[0];
+                        }
+                  }
+                  text.font = font;
+
+                  // Configure text layout
+                  RectTransform textRect = text.rectTransform;
+                  textRect.anchorMin = new Vector2(0.05f, 0.05f);
+                  textRect.anchorMax = new Vector2(0.95f, 0.95f);
+                  textRect.offsetMin = Vector2.zero;
+                  textRect.offsetMax = Vector2.zero;
+
+                  // Initially hide the panel
+                  messagePanel.SetActive(false);
+            }
+
+            // Корутина для скрытия сообщения
+            private IEnumerator HideMessageAfterDelay(float delay)
+            {
+                  yield return new WaitForSeconds(delay);
+
+                  if (messagePanel != null)
+                  {
+                        messagePanel.SetActive(false);
+                  }
+            }
+
+            // Метод для показа большого сообщения на весь экран
+            private void ShowBigScreenMessage(string message, float duration = 5.0f)
+            {
+                  // Create a new GameObject for the full-screen message
+                  GameObject msgObj = new GameObject("BigScreenMessage");
+
+                  // Find canvas or create one
+                  Canvas canvas = FindObjectOfType<Canvas>();
+                  Debug.Log("Creating EventSystem");
+                  GameObject eventSystem = new GameObject("EventSystem");
+                  eventSystem.AddComponent<EventSystem>();
+                  eventSystem.AddComponent<StandaloneInputModule>();
+            }
+
+            // Метод инициализации, вызывается при старте
+            private void Start()
+            {
+                  // Initialize the paint color
+                  currentPaintColor = duluxColors.Count > 0 ? duluxColors[0] : Color.white;
+
+                  // Create highlight material
+                  CreateHighlightMaterial();
+
+                  // Create the color palette UI
+                  CreateColorPalette();
+
+                  // Инициализируем компоненты
+                  ValidateComponents();
+
+                  // Set up user interface buttons
+                  SetupUI();
 
                   // Инициализируем камеру
                   InitializeCamera();
@@ -178,6 +371,21 @@ namespace Remalux.WallPainting.Vision
 
                   // Показываем сообщение пользователю
                   ShowMessage("Созданы тестовые стены для демонстрации", 5.0f);
+            }
+
+            // Метод для поворота камеры в нужное положение для тестовых стен
+            private void RotateCameraToFaceTestWalls()
+            {
+                  if (mainCamera == null) return;
+
+                  // Устанавливаем камеру в позицию для просмотра тестовых стен
+                  Vector3 cameraPosition = new Vector3(0, 1.7f, -3.0f);
+                  Quaternion cameraRotation = Quaternion.Euler(0, 0, 0);
+
+                  mainCamera.transform.position = cameraPosition;
+                  mainCamera.transform.rotation = cameraRotation;
+
+                  Debug.Log("Камера повернута для просмотра тестовых стен");
             }
 
             // Метод для создания индивидуальных тестовых стен (старый вариант)
@@ -354,21 +562,170 @@ namespace Remalux.WallPainting.Vision
                         resetButton.onClick.AddListener(OnResetButtonClicked);
                   }
 
+                  if (toggleModeButton != null)
+                  {
+                        toggleModeButton.onClick.AddListener(OnToggleModeButtonClicked);
+                  }
+                  else
+                  {
+                        // Create toggle mode button if not assigned
+                        CreateToggleModeButton();
+                  }
+
                   if (wallDetector != null && cameraPreview != null)
                   {
                         wallDetector.SetDebugImageDisplay(cameraPreview);
+                  }
+
+                  // Hide color palette initially since we start in detection mode
+                  if (colorPalettePanel != null)
+                  {
+                        colorPalettePanel.SetActive(false);
+                  }
+            }
+
+            private void CreateToggleModeButton()
+            {
+                  // Check if we have a canvas to add the button to
+                  Canvas canvas = FindObjectOfType<Canvas>();
+                  if (canvas == null)
+                  {
+                        Debug.LogWarning("No canvas found to create toggle mode button");
+                        return;
+                  }
+
+                  // Create button GameObject
+                  GameObject buttonObj = new GameObject("ToggleModeButton");
+                  buttonObj.transform.SetParent(canvas.transform, false);
+
+                  // Add button components
+                  Image buttonImage = buttonObj.AddComponent<Image>();
+                  buttonImage.color = new Color(0.2f, 0.2f, 0.2f, 0.8f);
+                  toggleModeButton = buttonObj.AddComponent<Button>();
+
+                  // Add text
+                  GameObject textObj = new GameObject("Text");
+                  textObj.transform.SetParent(buttonObj.transform, false);
+                  Text buttonText = textObj.AddComponent<Text>();
+
+                  // Try to find a font
+                  Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                  if (font == null)
+                  {
+                        Font[] fonts = Resources.FindObjectsOfTypeAll<Font>();
+                        if (fonts.Length > 0)
+                        {
+                              font = fonts[0];
+                        }
+                  }
+
+                  buttonText.font = font;
+                  buttonText.text = "MODE";
+                  buttonText.fontSize = 18;
+                  buttonText.alignment = TextAnchor.MiddleCenter;
+                  buttonText.color = Color.white;
+
+                  // Configure button layout
+                  RectTransform textRect = textObj.GetComponent<RectTransform>();
+                  textRect.anchorMin = Vector2.zero;
+                  textRect.anchorMax = Vector2.one;
+                  textRect.offsetMin = Vector2.zero;
+                  textRect.offsetMax = Vector2.zero;
+
+                  // Position the button in top-right corner
+                  RectTransform buttonRect = buttonObj.GetComponent<RectTransform>();
+                  buttonRect.anchorMin = new Vector2(1, 1);
+                  buttonRect.anchorMax = new Vector2(1, 1);
+                  buttonRect.pivot = new Vector2(1, 1);
+                  buttonRect.sizeDelta = new Vector2(80, 40);
+                  buttonRect.anchoredPosition = new Vector2(-10, -10);
+
+                  // Add listener
+                  toggleModeButton.onClick.AddListener(OnToggleModeButtonClicked);
+            }
+
+            private void OnToggleModeButtonClicked()
+            {
+                  // Toggle between detection and painting modes
+                  isPaintingMode = !isPaintingMode;
+
+                  // Update UI elements based on mode
+                  UpdateModeUI();
+
+                  // Show feedback message
+                  if (isPaintingMode)
+                  {
+                        ShowMessage("Режим покраски активирован", 2f);
+                  }
+                  else
+                  {
+                        ShowMessage("Режим обнаружения стен активирован", 2f);
+                  }
+            }
+
+            private void UpdateModeUI()
+            {
+                  // Update button text if available
+                  if (toggleModeButton != null)
+                  {
+                        Text buttonText = toggleModeButton.GetComponentInChildren<Text>();
+                        if (buttonText != null)
+                        {
+                              buttonText.text = isPaintingMode ? "DETECT" : "PAINT";
+                        }
+                  }
+
+                  // Show/hide color palette based on mode
+                  if (colorPalettePanel != null)
+                  {
+                        colorPalettePanel.SetActive(isPaintingMode);
+                  }
+
+                  // Enable/disable wall detector based on mode
+                  if (wallDetector != null)
+                  {
+                        if (isPaintingMode)
+                        {
+                              wallDetector.StopDetection();
+                        }
+                        else
+                        {
+                              wallDetector.StartDetection();
+                        }
+                  }
+
+                  // Show/hide wall markers based on mode
+                  UpdateWallMarkersVisibility(!isPaintingMode);
+
+                  // Update capture button text/icon if available
+                  if (captureButton != null)
+                  {
+                        Text captureText = captureButton.GetComponentInChildren<Text>();
+                        if (captureText != null)
+                        {
+                              captureText.text = isPaintingMode ? "Apply" : "Capture";
+                        }
                   }
             }
 
             private void OnCaptureButtonClicked()
             {
-                  if (!isCapturing)
+                  if (isPaintingMode)
                   {
-                        StartCapture();
+                        // In painting mode, apply colors to all walls
+                        PaintAllWalls();
                   }
                   else
                   {
-                        StopCapture();
+                        // In detection mode, toggle wall detection
+                        if (!isCapturing)
+                        {
+                              StartCapture();
+                        }
+                        else
+                        {
+                              StopCapture();
+                        }
                   }
             }
 
@@ -395,10 +752,10 @@ namespace Remalux.WallPainting.Vision
                   }
 
                   // Настраиваем параметры детектора для более точного обнаружения стен
-                  ConfigureAdvancedWallDetection(wallDetector);
+                  ConfigureAdvancedWallDetection();
 
                   // Включаем отображение контуров на видеопотоке
-                  EnableContoursOnCamera(wallDetector);
+                  EnableContoursOnCamera();
 
                   // Убедимся что RawImage для предпросмотра камеры виден и настроен
                   if (cameraPreview != null)
@@ -1005,50 +1362,63 @@ namespace Remalux.WallPainting.Vision
 
             private void Update()
             {
-                  // Process any pending actions on the main thread
-                  UnityMainThread.Update();
-
-                  // Обработка ввода пользователя
-                  HandleInput();
-
-                  // Обработка движения камеры, если необходимо
-                  HandleCameraMovement();
-
-                  // Добавляем счетчик для автоматического создания тестовых стен,
-                  // если ничего не обнаружено в течение 5 секунд
-                  if (wallMarkers.Count == 0 && Time.time > lastWallCreationTime + 5f)
-                  {
-                        Debug.Log("Стены не обнаружены в течение 5 секунд, создаю тестовые стены");
-                        CreateTestWalls();
-                        lastWallCreationTime = Time.time;
-                  }
-
-                  // Обработка ввода для создания тестовых стен
+                  // Testing controls - добавляем тестирование клавиш
                   if (Input.GetKeyDown(KeyCode.T))
                   {
                         CreateTestWalls();
-                        ShowMessage("Созданы тестовые стены. Используйте мышь для рисования.");
+                        Debug.Log("Созданы тестовые стены по клавише T");
                   }
 
-                  // Добавляем простой режим рисования
-                  if (Input.GetMouseButton(0) && wallMarkers.Count > 0)
+                  if (Input.GetKeyDown(KeyCode.F1))
                   {
-                        // Проверяем, попадает ли луч от мыши в стену
-                        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-                        RaycastHit hit;
+                        CreateIndividualTestWalls();
+                        Debug.Log("Создана тестовая стена по клавише F1");
+                  }
 
-                        if (Physics.Raycast(ray, out hit))
+                  if (Input.GetKeyDown(KeyCode.C))
+                  {
+                        ToggleCamera();
+                        Debug.Log("Камера переключена по клавише C");
+                  }
+
+                  if (Input.GetKeyDown(KeyCode.Space))
+                  {
+                        PaintAllWalls();
+                        Debug.Log("Попытка покрасить все стены по клавише ПРОБЕЛ");
+                  }
+
+                  // Обработка ввода только для активного режима
+                  if (isCapturing)
+                  {
+                        HandleInput();
+                        HandleCameraMovement();
+                  }
+
+                  // Handle painting input when in painting mode
+                  if (isPaintingMode)
+                  {
+                        HandleWallHighlighting();
+                        HandlePaintingInput();
+                  }
+            }
+
+            // Add the missing method to handle painting input
+            private void HandlePaintingInput()
+            {
+                  // Check for mouse click/touch to paint walls
+                  if (Input.GetMouseButtonDown(0))
+                  {
+                        // Don't paint if over UI
+                        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+                              return;
+
+                        // Get mouse/touch position
+                        Vector2 inputPosition = Input.mousePosition;
+
+                        // Paint at the position
+                        if (highlightedWall != null)
                         {
-                              // Проверяем, это ли наша стена
-                              if (hit.collider.CompareTag("Wall"))
-                              {
-                                    // Создаем позицию для рисования в текстурных координатах
-                                    Vector2 textureCoord = hit.textureCoord;
-                                    GameObject wall = hit.collider.gameObject;
-
-                                    // Рисуем на стене
-                                    PaintOnWall(wall, textureCoord, Color.red);
-                              }
+                              PaintWallAtPosition(inputPosition);
                         }
                   }
             }
@@ -1241,7 +1611,10 @@ namespace Remalux.WallPainting.Vision
             {
                   Debug.Log("Окрашиваю поверхность в точке: " + screenPosition);
 
-                  // Получаем цвет для покраски
+                  // Показываем визуальный индикатор нажатия
+                  ShowClickFeedback(screenPosition);
+
+                  // Получаем цвет для покраски из текущего выбранного в палитре
                   Color paintColor = GetPaintColor();
 
                   // Выполняем рейкаст из точки на экране для определения стены
@@ -1252,15 +1625,21 @@ namespace Remalux.WallPainting.Vision
                   Debug.DrawRay(ray.origin, ray.direction * 10, Color.red, 2.0f);
                   Debug.Log($"Рейкаст из {ray.origin} в направлении {ray.direction}");
 
+                  // Переменная для отслеживания успешной покраски
+                  bool paintApplied = false;
+
                   // Указываем максимальное расстояние 100f и используем все слои
                   if (Physics.Raycast(ray, out hit, 100f, Physics.AllLayers))
                   {
                         GameObject hitObject = hit.collider.gameObject;
                         Debug.Log($"Рейкаст попал в объект: {hitObject.name} с тегом: {hitObject.tag}, расстояние: {hit.distance}");
 
-                        // Проверяем, является ли объект стеной
-                        if (hitObject.CompareTag("Wall"))
+                        // Проверяем, является ли объект стеной или частью стены
+                        if (IsWallObject(hitObject))
                         {
+                              // Показываем предварительный просмотр покраски с плавным исчезновением
+                              StartCoroutine(ShowPaintPreview(hitObject, paintColor, 0.5f));
+
                               // Используем метод PaintWallTexture для применения реалистичной покраски
                               PaintWallTexture(hitObject, paintColor);
 
@@ -1270,60 +1649,61 @@ namespace Remalux.WallPainting.Vision
                               // Создаем частицы для дополнительного эффекта
                               CreatePaintParticles(hit.point, hit.normal);
 
-                              // Добавляем анимацию клика на экране
-                              ShowClickFeedback(screenPosition);
-
                               // Сообщаем другим компонентам о покраске стены
                               OnWallPainted?.Invoke(hitObject);
 
-                              // Показываем сообщение о покраске
-                              ShowMessage("Поверхность окрашена!", 2f);
-                              return;
+                              // Обновляем статус
+                              paintApplied = true;
                         }
                         else
                         {
-                              Debug.Log($"Объект {hitObject.name} не помечен тегом Wall. Пробуем применить покраску к родительскому объекту.");
+                              Debug.Log($"Объект {hitObject.name} не распознан как стена. Проверяем родительские объекты.");
 
                               // Проверяем родительский объект, если он есть
                               Transform parent = hitObject.transform.parent;
-                              while (parent != null)
+                              while (parent != null && !paintApplied)
                               {
-                                    if (parent.CompareTag("Wall"))
+                                    if (IsWallObject(parent.gameObject))
                                     {
+                                          // Показываем предварительный просмотр
+                                          StartCoroutine(ShowPaintPreview(parent.gameObject, paintColor, 0.5f));
+
                                           // Применяем покраску к родительскому объекту
                                           PaintWallTexture(parent.gameObject, paintColor);
                                           CreatePaintEffectAtHitPoint(hit.point, hit.normal, paintColor);
                                           CreatePaintParticles(hit.point, hit.normal);
-                                          ShowClickFeedback(screenPosition);
                                           OnWallPainted?.Invoke(parent.gameObject);
-                                          ShowMessage("Поверхность окрашена!", 2f);
-                                          return;
+
+                                          // Обновляем статус
+                                          paintApplied = true;
+                                          break;
                                     }
                                     parent = parent.parent;
                               }
 
-                              // Если не нашли объект с тегом Wall - просто применяем покраску к рендереру объекта
-                              Renderer renderer = hitObject.GetComponent<Renderer>();
-                              if (renderer != null)
+                              // Если не нашли объект с тегом Wall - пробуем применить к объекту с рендерером
+                              if (!paintApplied)
                               {
-                                    Debug.Log($"Применяем покраску к объекту {hitObject.name} без тега Wall");
-
-                                    // Создаем новый материал для объекта, если его еще нет
-                                    if (renderer.material == null)
+                                    Renderer renderer = hitObject.GetComponent<Renderer>();
+                                    if (renderer != null)
                                     {
-                                          renderer.material = new Material(Shader.Find("Standard"));
-                                    }
+                                          Debug.Log($"Применяем покраску к объекту {hitObject.name} без тега Wall");
 
-                                    // Используем метод покраски текстуры
-                                    PaintWallTexture(hitObject, paintColor);
-                                    CreatePaintEffectAtHitPoint(hit.point, hit.normal, paintColor);
-                                    ShowClickFeedback(screenPosition);
-                                    ShowMessage("Поверхность окрашена!", 2f);
-                                    return;
-                              }
-                              else
-                              {
-                                    Debug.Log($"Объект {hitObject.name} не имеет компонента Renderer");
+                                          // Создаем новый материал для объекта, если его еще нет
+                                          if (renderer.material == null)
+                                          {
+                                                renderer.material = new Material(Shader.Find("Standard"));
+                                          }
+
+                                          // Используем метод покраски текстуры
+                                          PaintWallTexture(hitObject, paintColor);
+                                          CreatePaintEffectAtHitPoint(hit.point, hit.normal, paintColor);
+                                          paintApplied = true;
+                                    }
+                                    else
+                                    {
+                                          Debug.Log($"Объект {hitObject.name} не имеет компонента Renderer");
+                                    }
                               }
                         }
                   }
@@ -1333,385 +1713,705 @@ namespace Remalux.WallPainting.Vision
                   }
 
                   // Если рейкаст не попал ни в один объект или это не стена, создаем UI-эффект
-                  GameObject paintedArea = CreateRealPaintedArea(screenPosition, paintColor);
-                  ShowClickFeedback(screenPosition); // Добавляем эффект клика
-                  ShowMessage("Поверхность окрашена!", 2f);
-            }
-
-            // Новый метод для создания эффекта брызг краски в точке попадания
-            private void CreatePaintEffectAtHitPoint(Vector3 hitPoint, Vector3 normal, Color paintColor)
-            {
-                  // Создаем объект для эффекта покраски
-                  GameObject paintEffect = new GameObject("PaintEffect_" + System.DateTime.Now.Ticks);
-                  paintEffect.transform.position = hitPoint;
-                  paintEffect.transform.rotation = Quaternion.LookRotation(normal);
-
-                  // Создаем quad для отображения эффекта
-                  GameObject paintQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                  paintQuad.transform.SetParent(paintEffect.transform, false);
-                  paintQuad.transform.localScale = new Vector3(0.3f, 0.3f, 0.01f);
-                  paintQuad.transform.localPosition = new Vector3(0, 0, 0.001f); // Небольшое смещение от поверхности
-
-                  // Создаем материал для эффекта
-                  Material paintMaterial = new Material(Shader.Find("Unlit/Transparent"));
-
-                  // Создаем текстуру для эффекта покраски
-                  Texture2D paintTexture = CreatePaintSplatterTexture(256, paintColor);
-                  paintMaterial.mainTexture = paintTexture;
-                  paintMaterial.color = new Color(paintColor.r, paintColor.g, paintColor.b, 0.9f);
-
-                  // Применяем материал к эффекту
-                  Renderer renderer = paintQuad.GetComponent<Renderer>();
-                  renderer.material = paintMaterial;
-
-                  // Автоматически удаляем эффект через некоторое время
-                  Destroy(paintEffect, 5f);
-            }
-
-            // Метод для создания текстуры брызг краски
-            private Texture2D CreatePaintSplatterTexture(int size, Color baseColor)
-            {
-                  Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
-                  Color[] pixels = new Color[size * size];
-
-                  // Центр текстуры
-                  Vector2 center = new Vector2(size / 2f, size / 2f);
-                  float maxRadius = size * 0.45f;
-
-                  // Создаем эффект краски с неровными краями
-                  for (int y = 0; y < size; y++)
+                  if (!paintApplied)
                   {
-                        for (int x = 0; x < size; x++)
-                        {
-                              int index = y * size + x;
-
-                              // Расстояние от центра
-                              float distX = x - center.x;
-                              float distY = y - center.y;
-                              float dist = Mathf.Sqrt(distX * distX + distY * distY);
-
-                              // По умолчанию прозрачный
-                              pixels[index] = new Color(0, 0, 0, 0);
-
-                              if (dist < maxRadius)
-                              {
-                                    // Добавляем шум для неровных краев
-                                    float noise = Mathf.PerlinNoise(x * 0.1f, y * 0.1f);
-                                    float edgeFactor = 1.0f - dist / maxRadius;
-
-                                    if (dist < maxRadius * (0.8f + noise * 0.3f))
-                                    {
-                                          // Вычисляем прозрачность на основе расстояния и шума
-                                          float alpha = edgeFactor * (0.5f + noise * 0.5f);
-                                          alpha = Mathf.Clamp01(alpha);
-
-                                          // Небольшое изменение оттенка для реализма
-                                          float hueShift = (noise - 0.5f) * 0.1f;
-                                          Color adjustedColor = baseColor;
-
-                                          // Применяем цвет с учетом прозрачности
-                                          pixels[index] = new Color(
-                                                adjustedColor.r,
-                                                adjustedColor.g,
-                                                adjustedColor.b,
-                                                alpha
-                                          );
-                                    }
-                              }
-                        }
-                  }
-
-                  // Рисуем капли по краям
-                  int numDrops = Random.Range(6, 12);
-                  for (int i = 0; i < numDrops; i++)
-                  {
-                        float angle = Random.Range(0, Mathf.PI * 2);
-                        float distance = Random.Range(maxRadius * 0.7f, maxRadius * 0.9f);
-                        Vector2 dropPosition = center + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * distance;
-
-                        // Создаем каплю с вытянутым "хвостом"
-                        float dropLength = Random.Range(10, 30);
-                        float dropWidth = Random.Range(3, 7);
-
-                        // Направление капли (обычно вниз)
-                        Vector2 dropDirection = new Vector2(Mathf.Cos(angle + Mathf.PI), Mathf.Sin(angle + Mathf.PI)).normalized;
-
-                        // Рисуем каплю
-                        for (float d = 0; d < dropLength; d += 0.5f)
-                        {
-                              float currentWidth = dropWidth * (1 - d / dropLength);
-                              Vector2 currentPos = dropPosition + dropDirection * d;
-
-                              for (float w = -currentWidth; w <= currentWidth; w += 0.5f)
-                              {
-                                    // Позиция перпендикулярно направлению
-                                    Vector2 perpendicular = new Vector2(-dropDirection.y, dropDirection.x);
-                                    Vector2 pixelPos = currentPos + perpendicular * w;
-
-                                    int pixelX = Mathf.RoundToInt(pixelPos.x);
-                                    int pixelY = Mathf.RoundToInt(pixelPos.y);
-
-                                    if (pixelX >= 0 && pixelX < size && pixelY >= 0 && pixelY < size)
-                                    {
-                                          int pixelIndex = pixelY * size + pixelX;
-                                          float alpha = (1 - Mathf.Abs(w) / currentWidth) * (1 - d / dropLength);
-                                          pixels[pixelIndex] = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
-                                    }
-                              }
-                        }
-                  }
-
-                  texture.SetPixels(pixels);
-                  texture.Apply();
-                  return texture;
-            }
-
-            // Добавляем событие для оповещения о покраске стены
-            public event System.Action<GameObject> OnWallPainted;
-
-            // Метод для создания реалистичного окрашенного участка с текстурой
-            private GameObject CreateRealPaintedArea(Vector2 center, Color baseColor)
-            {
-                  // Создаем новый объект для окрашенной области
-                  GameObject paintedArea = new GameObject("PaintedArea_" + System.DateTime.Now.Ticks);
-
-                  // Добавляем Canvas для UI элементов
-                  Canvas canvas = paintedArea.AddComponent<Canvas>();
-                  canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                  canvas.sortingOrder = 1;
-
-                  // Добавляем CanvasScaler
-                  paintedArea.AddComponent<CanvasScaler>();
-
-                  // Создаем маску, ограничивающую область покраски
-                  GameObject maskObj = new GameObject("PaintMask");
-                  maskObj.transform.SetParent(paintedArea.transform, false);
-
-                  // Вычисляем размер области покраски (примерно 40% ширины экрана)
-                  float areaWidth = Screen.width * 0.4f;
-                  float areaHeight = Screen.height * 0.6f;
-
-                  // Добавляем компонент RectMask2D для маскирования области
-                  RectMask2D mask = maskObj.AddComponent<RectMask2D>();
-                  RectTransform maskRect = mask.rectTransform;
-                  maskRect.anchorMin = new Vector2(0, 0);
-                  maskRect.anchorMax = new Vector2(0, 0);
-                  maskRect.sizeDelta = new Vector2(areaWidth, areaHeight);
-                  maskRect.anchoredPosition = center;
-
-                  // Создаем текстурированное изображение для окрашенной области
-                  GameObject paintImage = new GameObject("PaintTexture");
-                  paintImage.transform.SetParent(maskObj.transform, false);
-
-                  // Добавляем компонент RawImage
-                  RawImage paintRawImage = paintImage.AddComponent<RawImage>();
-
-                  // Создаем реалистичную текстуру окрашенной поверхности
-                  Texture2D paintTexture = CreateRealisticPaintTexture(256, baseColor);
-                  paintRawImage.texture = paintTexture;
-                  paintRawImage.color = new Color(baseColor.r, baseColor.g, baseColor.b, 0.95f);
-
-                  // Настраиваем размер и позицию изображения
-                  RectTransform imageRect = paintRawImage.rectTransform;
-                  imageRect.anchorMin = new Vector2(0, 0);
-                  imageRect.anchorMax = new Vector2(1, 1);
-                  imageRect.sizeDelta = Vector2.zero;
-                  imageRect.anchoredPosition = Vector2.zero;
-
-                  Debug.Log($"Создана реалистичная покраска стены размером ({areaWidth}x{areaHeight}) в позиции {center}");
-
-                  return paintedArea;
-            }
-
-            // Метод для создания реалистичной текстуры окрашенной поверхности
-            private Texture2D CreateRealisticPaintTexture(int size, Color baseColor)
-            {
-                  Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
-                  Color[] pixels = new Color[size * size];
-
-                  // Параметры шума для имитации неровностей краски
-                  float noiseScale = 0.03f;
-                  float edgeScale = 0.1f;
-
-                  // Генерируем текстуру с эффектом реалистичной покраски
-                  for (int y = 0; y < size; y++)
-                  {
-                        for (int x = 0; x < size; x++)
-                        {
-                              int index = y * size + x;
-
-                              // Добавляем шум Перлина для естественных неровностей
-                              float perlinNoise = Mathf.PerlinNoise(x * noiseScale, y * noiseScale);
-
-                              // Создаем эффект неровностей на краске
-                              float brightnessFactor = 0.92f + perlinNoise * 0.08f;
-
-                              // Немного меняем оттенок цвета для естественного вида
-                              Color pixelColor = new Color(
-                                    baseColor.r * brightnessFactor,
-                                    baseColor.g * brightnessFactor,
-                                    baseColor.b * brightnessFactor,
-                                    1.0f
-                              );
-
-                              pixels[index] = pixelColor;
-                        }
-                  }
-
-                  texture.SetPixels(pixels);
-                  texture.Apply();
-                  return texture;
-            }
-
-            // Метод для покраски всех стен одновременно
-            private void PaintAllWalls()
-            {
-                  if (detectedWalls.Count == 0)
-                  {
-                        ShowBigScreenMessage("НЕТ СТЕН ДЛЯ ПОКРАСКИ!\nНажмите клавишу T для создания тестовых стен");
-                        return;
-                  }
-
-                  // Получаем синий материал (или создаем новый, если он ещё не создан)
-                  if (blueMaterial == null)
-                  {
-                        blueMaterial = new Material(Shader.Find("Standard"));
-                        blueMaterial.color = new Color(0.1f, 0.4f, 1.0f); // Насыщенный голубой
-                        blueMaterial.EnableKeyword("_EMISSION");
-                        blueMaterial.SetColor("_EmissionColor", new Color(0.1f, 0.3f, 1.0f) * 0.8f); // Голубое свечение
-                        blueMaterial.SetFloat("_Glossiness", 0.8f); // Высокий глянец
-                        blueMaterial.SetFloat("_Metallic", 0.2f); // Немного металлический
-                  }
-
-                  // Находим все объекты с тегом Wall
-                  GameObject[] walls = GameObject.FindGameObjectsWithTag("Wall");
-
-                  if (walls.Length == 0)
-                  {
-                        ShowBigScreenMessage("НЕТ СТЕН ДЛЯ ПОКРАСКИ!\nНажмите клавишу T для создания тестовых стен");
-                        return;
-                  }
-
-                  // Последовательно окрашиваем стены с анимацией
-                  StartCoroutine(SequentialPaintCoroutine(walls));
-            }
-
-            // Корутина для последовательной покраски стен с эффектами
-            private IEnumerator SequentialPaintCoroutine(GameObject[] walls)
-            {
-                  int paintedCount = 0;
-                  float delayBetweenWalls = 0.5f; // Пауза между покраской стен
-                  List<GameObject> paintedWalls = new List<GameObject>();
-
-                  // Показываем сообщение о начале покраски
-                  ShowMessage("Начинаем окраску стен...", 2.0f);
-
-                  foreach (GameObject wall in walls)
-                  {
-                        Renderer renderer = wall.GetComponent<Renderer>();
-                        if (renderer != null)
-                        {
-                              // Сохраняем оригинальный материал
-                              Material originalMaterial = renderer.material;
-
-                              // Создаем эффект "подготовки к покраске" - мигание стены
-                              for (int i = 0; i < 3; i++) // Мигаем 3 раза
-                              {
-                                    // Создаем материал "подготовки" - белый
-                                    Material prepMaterial = new Material(Shader.Find("Standard"));
-                                    prepMaterial.color = Color.white;
-                                    prepMaterial.EnableKeyword("_EMISSION");
-                                    prepMaterial.SetColor("_EmissionColor", Color.white * 0.5f);
-
-                                    renderer.material = prepMaterial;
-                                    yield return new WaitForSeconds(0.1f);
-
-                                    renderer.material = originalMaterial;
-                                    yield return new WaitForSeconds(0.1f);
-                              }
-
-                              // Применяем синий материал
-                              renderer.material = blueMaterial;
-                              paintedCount++;
-                              paintedWalls.Add(wall);
-
-                              // Создаем эффект покраски в позиции каждой стены
-                              Vector3 centerPos = wall.transform.position;
-                              CreatePaintEffectAtHitPoint(centerPos, -wall.transform.forward, blueMaterial.color);
-
-                              // Показываем текст с прогрессом
-                              ShowMessage($"Покрашено {paintedCount}/{walls.Length} поверхностей", 1.0f);
-
-                              // Ждем перед покраской следующей стены
-                              yield return new WaitForSeconds(delayBetweenWalls);
-                        }
-                  }
-
-                  // Показываем сообщение о результате
-                  if (paintedCount > 0)
-                  {
-                        ShowBigScreenMessage($"УСПЕШНО ОКРАШЕНО {paintedCount} ПОВЕРХНОСТЕЙ!");
-                        // Создаем эффект "завершения" - вспышка всех покрашенных стен
-                        StartCoroutine(FlashPaintedWalls(paintedWalls));
-                        Debug.Log($"Окрашено {paintedCount} стен одним нажатием пробела");
+                        // В режиме Dulux Visualizer показываем сообщение, что не найдена поверхность для покраски
+                        ShowMessage("Не найдена поверхность для покраски", 1.5f);
                   }
                   else
                   {
-                        ShowBigScreenMessage("НЕ УДАЛОСЬ ОКРАСИТЬ СТЕНЫ\nПопробуйте создать тестовые стены клавишей T");
-                        Debug.Log("Не удалось найти стены с тегом Wall для покраски");
+                        // Показываем сообщение об успешной покраске
+                        ShowMessage("Поверхность окрашена!", 1.5f);
                   }
             }
 
-            // Корутина для создания эффекта завершения окраски - вспышка всех стен
-            private IEnumerator FlashPaintedWalls(List<GameObject> paintedWalls)
+            // Метод для определения, является ли объект стеной
+            private bool IsWallObject(GameObject obj)
             {
-                  // Ждем немного после сообщения об успешной покраске
-                  yield return new WaitForSeconds(0.5f);
+                  if (obj == null) return false;
 
-                  // Вспышка всех покрашенных стен
-                  foreach (GameObject wall in paintedWalls)
+                  // Проверяем по тегу
+                  if (obj.CompareTag("Wall"))
+                        return true;
+
+                  // Проверяем по имени
+                  string name = obj.name.ToLower();
+                  if (name.Contains("wall") || name.Contains("стена"))
+                        return true;
+
+                  // Проверяем наличие компонента с WallData - исправлено, так как WallData это struct
+                  // WallData является структурой и не может быть null, поэтому требуется другой подход
+                  try
                   {
-                        Renderer renderer = wall.GetComponent<Renderer>();
-                        if (renderer != null)
+                        // Поскольку WallData - это struct, просто проверяем наличие MonoBehaviour с именем, содержащим WallData
+                        foreach (var component in obj.GetComponents<MonoBehaviour>())
                         {
-                              // Сохраняем оригинальный материал
-                              Material origMaterial = renderer.material;
-
-                              // Создаем яркий материал для вспышки
-                              Material flashMaterial = new Material(Shader.Find("Standard"));
-                              flashMaterial.color = new Color(0.3f, 0.6f, 1.0f);
-                              flashMaterial.EnableKeyword("_EMISSION");
-                              flashMaterial.SetColor("_EmissionColor", new Color(0.3f, 0.6f, 1.0f) * 2.0f);
-
-                              renderer.material = flashMaterial;
-
-                              // Создаем частицы в центре стены, если в проекте есть поддержка частиц
-                              try
+                              if (component.GetType().Name.Contains("WallData"))
                               {
-                                    CreatePaintParticles(wall.transform.position, wall.transform.forward);
+                                    return true;
                               }
-                              catch (System.Exception)
+                        }
+                  }
+                  catch (System.Exception)
+                  {
+                        // Игнорируем исключения
+                  }
+
+                  // Любые другие специфические для вашего проекта проверки
+
+                  return false;
+            }
+
+            // Метод для создания материала подсветки
+            private Material CreateHighlightMaterial()
+            {
+                  // Create a new material with the standard shader
+                  Material highlightMaterial = new Material(Shader.Find("Standard"));
+                  // Set properties for highlighting
+                  highlightMaterial.color = new Color(1f, 0.8f, 0.2f, 0.7f); // Yellow highlight
+                  highlightMaterial.EnableKeyword("_EMISSION");
+                  highlightMaterial.SetColor("_EmissionColor", Color.yellow * 0.5f);
+
+                  // Store the material for later use
+                  highlightMaterial = highlightMaterial;
+                  return highlightMaterial;
+            }
+
+            // Метод для создания палитры цветов
+            private void CreateColorPalette()
+            {
+                  // Create color palette panel if container is assigned
+                  if (colorPaletteContainer == null)
+                  {
+                        // Create a container if one doesn't exist
+                        GameObject container = new GameObject("ColorPaletteContainer");
+                        colorPaletteContainer = container.transform;
+                        container.transform.SetParent(transform);
+
+                        // Position it in the corner of the screen
+                        RectTransform containerRectTransform = container.AddComponent<RectTransform>();
+                        containerRectTransform.anchorMin = new Vector2(0.8f, 0);
+                        containerRectTransform.anchorMax = new Vector2(1, 0.3f);
+                        containerRectTransform.offsetMin = Vector2.zero;
+                        containerRectTransform.offsetMax = Vector2.zero;
+
+                        Debug.Log("Created color palette container dynamically");
+                  }
+
+                  // Create main panel
+                  colorPalettePanel = new GameObject("ColorPalette");
+                  colorPalettePanel.transform.SetParent(colorPaletteContainer, false);
+
+                  // Add panel components
+                  RectTransform rectTransform = colorPalettePanel.AddComponent<RectTransform>();
+                  Image panelImage = colorPalettePanel.AddComponent<Image>();
+                  panelImage.color = new Color(0.1f, 0.1f, 0.1f, 0.8f);
+
+                  // Configure panel layout
+                  rectTransform.anchorMin = new Vector2(0, 0);
+                  rectTransform.anchorMax = new Vector2(1, 1);
+                  rectTransform.offsetMin = Vector2.zero;
+                  rectTransform.offsetMax = Vector2.zero;
+
+                  // Create grid layout for colors
+                  GridLayoutGroup grid = colorPalettePanel.AddComponent<GridLayoutGroup>();
+                  grid.cellSize = new Vector2(50, 50);
+                  grid.spacing = new Vector2(10, 10);
+                  grid.padding = new RectOffset(10, 10, 10, 10);
+                  grid.childAlignment = TextAnchor.MiddleCenter;
+
+                  // Create color buttons
+                  foreach (Color color in duluxColors)
+                  {
+                        CreateColorButton(color);
+                  }
+
+                  // Update selection to show the currently selected color
+                  UpdateColorSelection();
+
+                  // Hide palette initially (it will be shown when switching to painting mode)
+                  colorPalettePanel.SetActive(false);
+            }
+
+            // Метод для создания кнопки цвета
+            private void CreateColorButton(Color color)
+            {
+                  GameObject buttonObj = new GameObject("ColorButton_" + ColorToHex(color));
+                  buttonObj.transform.SetParent(colorPalettePanel.transform, false);
+
+                  // Add required components
+                  Image buttonImage = buttonObj.AddComponent<Image>();
+                  Button button = buttonObj.AddComponent<Button>();
+
+                  // Set color and add selection indicator if this is the current color
+                  buttonImage.color = color;
+                  if (color == currentPaintColor)
+                  {
+                        AddSelectionIndicator(buttonObj.transform);
+                  }
+
+                  // Make the button rounded
+                  buttonImage.sprite = CreateCircleSprite();
+
+                  // Add click handler
+                  button.onClick.AddListener(() => SelectColor(color));
+            }
+
+            // Метод для получения hex кода из цвета
+            private string ColorToHex(Color color)
+            {
+                  return ColorUtility.ToHtmlStringRGB(color);
+            }
+
+            // Метод для создания круглого спрайта
+            private Sprite CreateCircleSprite()
+            {
+                  return CreateCircleSprite(64, Color.white);
+            }
+
+            // Расширенный метод для создания круглого спрайта
+            private Sprite CreateCircleSprite(int size, Color color, bool outline = false)
+            {
+                  Texture2D texture = CreateCircleTexture(size, color, outline);
+                  return Sprite.Create(texture, new UnityEngine.Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
+            }
+
+            // Метод для создания круглой текстуры (с дополнительной опцией для контура)
+            private Texture2D CreateCircleTexture(int size, Color color, bool outline = false)
+            {
+                  Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+
+                  float radius = size / 2f;
+                  float radiusSquared = radius * radius;
+                  float outlineThickness = size * 0.05f; // 5% от размера для контура
+
+                  // Заполняем текстуру
+                  for (int y = 0; y < size; y++)
+                  {
+                        for (int x = 0; x < size; x++)
+                        {
+                              float dx = radius - x;
+                              float dy = radius - y;
+                              float distanceSquared = dx * dx + dy * dy;
+
+                              // Если outline = true, создаем обводку, иначе заливаем круг
+                              if (outline)
                               {
-                                    // Игнорируем ошибки, если частицы не поддерживаются
+                                    // Для контура проверяем, находится ли пиксель на краю круга
+                                    if (distanceSquared <= radiusSquared && distanceSquared >= radiusSquared - 2 * radius * outlineThickness)
+                                    {
+                                          texture.SetPixel(x, y, color);
+                                    }
+                                    else
+                                    {
+                                          texture.SetPixel(x, y, new Color(0, 0, 0, 0));
+                                    }
+                              }
+                              else
+                              {
+                                    // Для полного круга проверяем, находится ли пиксель внутри радиуса
+                                    if (distanceSquared <= radiusSquared)
+                                    {
+                                          texture.SetPixel(x, y, color);
+                                    }
+                                    else
+                                    {
+                                          texture.SetPixel(x, y, new Color(0, 0, 0, 0));
+                                    }
                               }
                         }
                   }
 
-                  // Ждем немного, чтобы показать эффект вспышки
-                  yield return new WaitForSeconds(0.3f);
+                  texture.Apply();
+                  return texture;
+            }
 
-                  // Возвращаем оригинальный материал
-                  foreach (GameObject wall in paintedWalls)
+            // Метод для настройки расширенного обнаружения стен
+            private void ConfigureAdvancedWallDetection()
+            {
+                  // Check if the wall detector is available
+                  if (wallDetector == null)
                   {
-                        Renderer renderer = wall.GetComponent<Renderer>();
-                        if (renderer != null)
-                        {
-                              renderer.material = blueMaterial;
-                        }
+                        Debug.LogError("Компонент WallDetector не найден!");
+                        return;
+                  }
+
+                  // Configure wall detection parameters using proper methods on WallDetector
+                  // Since we don't know the exact API, we'll use SetParameter method if available
+                  // or comment out these properties if they're not valid
+
+                  // Example of safer property setting:
+                  if (wallDetector is MonoBehaviour detector)
+                  {
+                        // Set detector parameters through a configuration method if available
+                        wallDetector.SendMessage("ConfigureDetector",
+                              new Dictionary<string, object> {
+                                    { "thresholdMin", 100 },
+                                    { "thresholdMax", 255 },
+                                    { "dilationIterations", 2 },
+                                    { "erosionIterations", 1 },
+                                    { "minimumContourArea", 5000 }
+                              }, SendMessageOptions.DontRequireReceiver);
+                  }
+
+                  Debug.Log("Настроено расширенное обнаружение стен");
+            }
+
+            // Метод для включения отображения контуров на камере
+            private void EnableContoursOnCamera()
+            {
+                  if (wallDetector == null)
+                  {
+                        Debug.LogError("Компонент WallDetector не найден!");
+                        return;
+                  }
+
+                  // Configure contour display using SendMessage to safely set properties
+                  wallDetector.SendMessage("SetContourDisplay",
+                        new Dictionary<string, object> {
+                              { "showContours", true },
+                              { "contourColor", new Color(0, 1, 0, 1) }, // Green color
+                              { "contourThickness", 2 }
+                        }, SendMessageOptions.DontRequireReceiver);
+
+                  Debug.Log("Включено отображение контуров на камере");
+            }
+
+            // Метод для обработки подсветки стен
+            private void HandleWallHighlighting()
+            {
+                  // Если режим покраски активен
+                  if (isPaintMode && !isColorSelectionMode)
+                  {
+                        // Подсвечиваем стену под курсором
+                        HighlightWallUnderCursor();
+                  }
+                  else
+                  {
+                        // Снимаем подсветку со всех стен
+                        UnhighlightWall();
                   }
             }
 
-            // Метод для создания частиц краски для дополнительного эффекта
+            // Method to highlight the wall under the cursor
+            private void HighlightWallUnderCursor()
+            {
+                  // If highlight material doesn't exist, create it
+                  if (highlightMaterial == null)
+                  {
+                        highlightMaterial = CreateHighlightMaterial();
+                  }
+
+                  // Check for mouse position
+                  Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
+                  RaycastHit hit;
+
+                  // If we hit something
+                  if (Physics.Raycast(ray, out hit, maxPaintDistance))
+                  {
+                        GameObject hitObject = hit.collider.gameObject;
+
+                        // If it's a wall or part of a wall
+                        if (IsWallObject(hitObject))
+                        {
+                              // If we're not already highlighting this wall
+                              if (highlightedWall != hitObject)
+                              {
+                                    // Unhighlight previous wall
+                                    UnhighlightWall();
+
+                                    // Store reference to original material
+                                    Renderer renderer = hitObject.GetComponent<Renderer>();
+                                    if (renderer != null && renderer.material != null)
+                                    {
+                                          // Save original material
+                                          if (!originalMaterials.ContainsKey(hitObject))
+                                          {
+                                                originalMaterials[hitObject] = renderer.material;
+                                          }
+
+                                          // Apply highlight material
+                                          renderer.material = highlightMaterial;
+
+                                          // Set as currently highlighted
+                                          highlightedWall = hitObject;
+
+                                          // Show the brush preview at the hit point
+                                          ShowPaintPreview(hitObject, hit.point, hit.normal);
+                                    }
+                              }
+                        }
+                        else
+                        {
+                              // We hit something that's not a wall, remove highlight
+                              UnhighlightWall();
+                        }
+                  }
+                  else
+                  {
+                        // We didn't hit anything, remove highlight
+                        UnhighlightWall();
+                  }
+            }
+
+            // Method to remove highlighting from walls
+            private void UnhighlightWall()
+            {
+                  // If we have a highlighted wall
+                  if (highlightedWall != null)
+                  {
+                        // Get renderer
+                        Renderer renderer = highlightedWall.GetComponent<Renderer>();
+
+                        // Restore original material if we have it
+                        if (renderer != null && originalMaterials.ContainsKey(highlightedWall))
+                        {
+                              renderer.material = originalMaterials[highlightedWall];
+                              originalMaterials.Remove(highlightedWall);
+                        }
+
+                        // Clear reference
+                        highlightedWall = null;
+                  }
+            }
+
+            private void AddSelectionIndicator(Transform buttonTransform)
+            {
+                  // Удаляем существующий индикатор, если есть
+                  Transform existingIndicator = buttonTransform.Find("SelectionIndicator");
+                  if (existingIndicator != null)
+                  {
+                        return; // Уже есть индикатор
+                  }
+
+                  // Создаем индикатор выбора
+                  GameObject indicator = new GameObject("SelectionIndicator");
+                  indicator.transform.SetParent(buttonTransform, false);
+
+                  // Добавляем компоненты
+                  RectTransform rectTransform = indicator.AddComponent<RectTransform>();
+                  Image image = indicator.AddComponent<Image>();
+
+                  // Настраиваем размер и позицию
+                  rectTransform.anchorMin = new Vector2(0, 0);
+                  rectTransform.anchorMax = new Vector2(1, 1);
+                  rectTransform.offsetMin = new Vector2(-5, -5);
+                  rectTransform.offsetMax = new Vector2(5, 5);
+
+                  // Используем изображение рамки
+                  image.sprite = CreateCircleSprite(32, Color.white, true);
+                  image.color = new Color(1, 1, 1, 0.7f);
+                  image.type = Image.Type.Sliced;
+
+                  // Анимация пульсации
+                  StartCoroutine(PulseIndicator(indicator));
+            }
+
+            private IEnumerator PulseIndicator(GameObject indicator)
+            {
+                  Image image = indicator.GetComponent<Image>();
+                  if (image == null) yield break;
+
+                  float duration = 1.5f;
+                  float halfDuration = duration / 2;
+                  float elapsed = 0f;
+
+                  while (indicator != null)
+                  {
+                        // Пульсирующая прозрачность
+                        if (elapsed < halfDuration)
+                        {
+                              float alpha = Mathf.Lerp(0.7f, 1.0f, elapsed / halfDuration);
+                              image.color = new Color(1, 1, 1, alpha);
+                        }
+                        else
+                        {
+                              float alpha = Mathf.Lerp(1.0f, 0.7f, (elapsed - halfDuration) / halfDuration);
+                              image.color = new Color(1, 1, 1, alpha);
+                        }
+
+                        elapsed += Time.deltaTime;
+                        if (elapsed >= duration)
+                        {
+                              elapsed = 0f;
+                        }
+
+                        yield return null;
+                  }
+            }
+
+            // Метод для выбора цвета
+            private void SelectColor(Color color)
+            {
+                  selectedColor = color;
+                  UpdateColorSelection(color);
+                  isColorSelectionMode = false;
+
+                  // Показываем сообщение с выбранным цветом
+                  ShowMessage($"Выбран цвет: {ColorToHex(color)}", 2.0f);
+            }
+
+            private void UpdateColorSelection(Color color)
+            {
+                  if (colorPaletteContainer == null)
+                  {
+                        Debug.LogWarning("Color palette container is null in UpdateColorSelection - cannot update selection");
+                        return;
+                  }
+
+                  selectedColor = color;
+                  Debug.Log($"Выбран цвет: {ColorToHex(color)}");
+
+                  // Обновляем индикаторы
+                  foreach (Transform child in colorPaletteContainer)
+                  {
+                        // Check if child is null (may have been destroyed)
+                        if (child == null) continue;
+
+                        // Process child object
+                        Button button = child.GetComponent<Button>();
+                        if (button != null)
+                        {
+                              // Remove existing selection indicator if there is one
+                              Transform existingIndicator = child.Find("SelectionIndicator");
+                              if (existingIndicator != null)
+                              {
+                                    Destroy(existingIndicator.gameObject);
+                              }
+
+                              // Add selection indicator if this is the selected color
+                              Image buttonImage = child.GetComponent<Image>();
+                              if (buttonImage != null && ColorApproximatelyEqual(buttonImage.color, color, 0.01f))
+                              {
+                                    AddSelectionIndicator(child);
+                              }
+                        }
+                  }
+
+                  // Перебираем все созданные объекты стен
+                  if (createdWallObjects != null)
+                  {
+                        foreach (GameObject wall in createdWallObjects)
+                        {
+                              if (wall != null)
+                              {
+                                    PaintWallTexture(wall);
+                                    CreatePaintEffectAtHitPoint(wall.transform.position, wall.transform.forward, GetPaintColor());
+                              }
+                        }
+
+                        ShowMessage("Все стены покрашены выбранным цветом", 2.0f);
+                        InvokeOnWallPainted();
+                  }
+            }
+
+            // Helper method to compare colors with tolerance
+            private bool ColorApproximatelyEqual(Color color1, Color color2, float tolerance)
+            {
+                  return Mathf.Abs(color1.r - color2.r) < tolerance &&
+                         Mathf.Abs(color1.g - color2.g) < tolerance &&
+                         Mathf.Abs(color1.b - color2.b) < tolerance;
+            }
+
+            // Возвращает текущий выбранный цвет для покраски
+            private Color GetPaintColor()
+            {
+                  // Если цвет уже выбран, используем его
+                  if (selectedColor != Color.clear)
+                  {
+                        return selectedColor;
+                  }
+
+                  // Иначе используем первый из списка или белый
+                  if (duluxColors != null && duluxColors.Count > 0)
+                  {
+                        return duluxColors[0];
+                  }
+
+                  return Color.white;
+            }
+
+            // Метод для покраски текстуры стены
+            private void PaintWallTexture(GameObject wall)
+            {
+                  if (wall == null) return;
+
+                  Renderer renderer = wall.GetComponent<Renderer>();
+                  if (renderer == null) return;
+
+                  // Создаем материал для покраски, если нужно
+                  if (renderer.material.name.Contains("Default-Material") || !renderer.material.name.Contains("PaintMaterial"))
+                  {
+                        Material paintMaterial = new Material(Shader.Find("Standard"));
+                        paintMaterial.name = "PaintMaterial";
+                        renderer.material = paintMaterial;
+                  }
+
+                  // Устанавливаем цвет материала
+                  renderer.material.color = GetPaintColor();
+
+                  Debug.Log($"Стена покрашена в цвет: {GetPaintColor()}");
+            }
+
+            // Add the overloaded method with Color parameter
+            private void PaintWallTexture(GameObject wall, Color paintColor)
+            {
+                  // Call the single parameter version and pass any additional processing needed for the color
+                  PaintWallTexture(wall);
+                  // Additional color-specific processing can be added here if needed
+            }
+
+            // Метод для создания визуального эффекта в точке контакта с поверхностью
+            private void CreatePaintEffectAtHitPoint(Vector3 position, Vector3 normal, Color color)
+            {
+                  // Создаем сферу как индикатор точки покраски
+                  GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                  sphere.name = "PaintEffect";
+                  sphere.transform.position = position;
+                  sphere.transform.localScale = new Vector3(0.05f, 0.05f, 0.05f);
+
+                  // Устанавливаем материал
+                  Renderer renderer = sphere.GetComponent<Renderer>();
+                  if (renderer != null)
+                  {
+                        Material material = new Material(Shader.Find("Standard"));
+                        material.color = color;
+                        material.SetFloat("_Glossiness", 0.8f); // Высокий уровень глянца
+                        renderer.material = material;
+                  }
+
+                  // Отключаем коллайдер
+                  Collider collider = sphere.GetComponent<Collider>();
+                  if (collider != null)
+                  {
+                        collider.enabled = false;
+                  }
+
+                  // Создаем эффект капли
+                  StartCoroutine(PaintDropEffect(sphere));
+
+                  // Удаляем через 2 секунды
+                  Destroy(sphere, 2.0f);
+            }
+
+            // Корутина для эффекта капли краски
+            private IEnumerator PaintDropEffect(GameObject paintDrop)
+            {
+                  float duration = 1.0f;
+                  float elapsed = 0f;
+                  Vector3 originalScale = paintDrop.transform.localScale;
+                  Vector3 targetScale = originalScale * 2.5f;
+
+                  while (elapsed < duration)
+                  {
+                        float t = elapsed / duration;
+
+                        // Растягиваем каплю вниз
+                        float scaleY = Mathf.Lerp(originalScale.y, targetScale.y, t);
+                        paintDrop.transform.localScale = new Vector3(originalScale.x, scaleY, originalScale.z);
+
+                        // Смещаем вниз
+                        paintDrop.transform.position += Vector3.down * Time.deltaTime * 0.05f;
+
+                        elapsed += Time.deltaTime;
+                        yield return null;
+                  }
+            }
+
+            // Метод, вызываемый после покраски стены
+            private void InvokeOnWallPainted()
+            {
+                  // Здесь можно добавить логику, которая выполняется после покраски стены
+                  // Например, звуковой эффект, обновление UI и т.д.
+                  Debug.Log("Стена окрашена");
+
+                  // Возможно, какие-то игровые события или достижения?
+                  // Например, счетчик покрашенных стен
+            }
+
+            // Method to paint all detected walls with the current color
+            private void PaintAllWalls()
+            {
+                  Debug.Log("Painting all walls with color: " + ColorToHex(GetPaintColor()));
+
+                  // Check if we have walls to paint
+                  bool wallsPainted = false;
+
+                  // First try to paint created wall objects
+                  if (createdWallObjects != null && createdWallObjects.Count > 0)
+                  {
+                        foreach (GameObject wall in createdWallObjects)
+                        {
+                              if (wall != null)
+                              {
+                                    PaintWallTexture(wall);
+                                    CreatePaintEffectAtHitPoint(wall.transform.position, wall.transform.forward, GetPaintColor());
+                                    wallsPainted = true;
+                              }
+                        }
+                  }
+
+                  // Then try wall markers
+                  if (wallMarkers != null && wallMarkers.Count > 0)
+                  {
+                        foreach (GameObject marker in wallMarkers)
+                        {
+                              if (marker != null)
+                              {
+                                    PaintWallTexture(marker);
+                                    CreatePaintEffectAtHitPoint(marker.transform.position, marker.transform.forward, GetPaintColor());
+                                    wallsPainted = true;
+                              }
+                        }
+                  }
+
+                  // Notify the user about the result
+                  if (wallsPainted)
+                  {
+                        ShowMessage("Все стены окрашены в выбранный цвет", 2.0f);
+                        InvokeOnWallPainted();
+                  }
+                  else
+                  {
+                        ShowMessage("Не найдены стены для покраски", 2.0f);
+                  }
+            }
+
+            // Метод для показа предпросмотра покраски при наведении
+            private void ShowPaintPreview(GameObject wall, Vector3 hitPoint, Vector3 hitNormal)
+            {
+                  if (wall == null) return;
+
+                  // Указатель для предпросмотра
+                  GameObject previewIndicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                  previewIndicator.name = "PaintPreviewIndicator";
+                  previewIndicator.transform.position = hitPoint;
+                  previewIndicator.transform.localScale = new Vector3(brushSize * 2, brushSize * 0.2f, brushSize * 2);
+                  previewIndicator.transform.up = hitNormal;
+
+                  // Настраиваем материал
+                  Renderer renderer = previewIndicator.GetComponent<Renderer>();
+                  if (renderer != null)
+                  {
+                        Material material = new Material(Shader.Find("Transparent/Diffuse"));
+                        Color previewColor = GetPaintColor();
+                        previewColor.a = 0.5f; // Полупрозрачный
+                        material.color = previewColor;
+                        renderer.material = material;
+                  }
+
+                  // Отключаем коллайдер
+                  Collider collider = previewIndicator.GetComponent<Collider>();
+                  if (collider != null)
+                  {
+                        collider.enabled = false;
+                  }
+
+                  // Удаляем через короткое время
+                  Destroy(previewIndicator, 0.2f);
+            }
+
+            // Метод для создания частиц при покраске стены
             private void CreatePaintParticles(Vector3 position, Vector3 normal)
             {
                   // Создаем объект для системы частиц
@@ -1719,1482 +2419,263 @@ namespace Remalux.WallPainting.Vision
                   particleObj.transform.position = position;
                   particleObj.transform.rotation = Quaternion.LookRotation(normal);
 
-                  // Добавляем компонент ParticleSystem
-                  ParticleSystem ps = particleObj.AddComponent<ParticleSystem>();
+                  // Добавляем компонент системы частиц
+                  ParticleSystem particleSystem = particleObj.AddComponent<ParticleSystem>();
 
-                  // Настраиваем основные параметры
-                  var main = ps.main;
+                  // Настраиваем систему частиц
+                  var main = particleSystem.main;
                   main.startSpeed = 1.0f;
                   main.startSize = 0.05f;
-                  main.startLifetime = 1.5f;
-                  main.maxParticles = 100;
+                  main.startLifetime = 0.5f;
+                  main.startColor = GetPaintColor();
 
-                  // Получаем цвет покраски через специальный метод
-                  Color paintColor = GetPaintColor();
-                  main.startColor = paintColor;
-
-                  // Форма эмиссии - конус
-                  var shape = ps.shape;
+                  // Настраиваем форму эмиссии
+                  var shape = particleSystem.shape;
                   shape.shapeType = ParticleSystemShapeType.Cone;
                   shape.angle = 25f;
 
-                  // Добавляем настройки для более красивых брызг
-                  var emission = ps.emission;
-                  emission.rateOverTime = 50;
-                  emission.burstCount = 1;
-                  emission.SetBurst(0, new ParticleSystem.Burst(0f, 30));
+                  // Настраиваем эмиссию
+                  var emission = particleSystem.emission;
+                  emission.rateOverTime = 0;
+                  emission.SetBursts(new ParticleSystem.Burst[] { new ParticleSystem.Burst(0.0f, 20) });
 
-                  // Настраиваем размер частиц и скорость
-                  var sizeOverLifetime = ps.sizeOverLifetime;
-                  sizeOverLifetime.enabled = true;
-                  AnimationCurve sizeOverLifetimeCurve = new AnimationCurve();
-                  sizeOverLifetimeCurve.AddKey(0f, 1f);
-                  sizeOverLifetimeCurve.AddKey(1f, 0f);
-                  sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(1f, sizeOverLifetimeCurve);
-
-                  // Настраиваем рендерер частиц для более качественного отображения
-                  var renderer = ps.GetComponent<ParticleSystemRenderer>();
-                  renderer.renderMode = ParticleSystemRenderMode.Billboard;
-                  renderer.material = new Material(Shader.Find("Particles/Standard Unlit"));
-                  renderer.material.color = paintColor;
-
-                  // Автоматическое уничтожение
+                  // Удаляем объект через 2 секунды
                   Destroy(particleObj, 2.0f);
-
-                  // Запускаем систему частиц
-                  ps.Play();
             }
 
-            // Компонент для плавного проявления покраски
-            public class PaintFadeIn : MonoBehaviour
-            {
-                  public float fadeInTime = 0.5f;
-                  private float elapsedTime = 0f;
-                  private RawImage paintImage;
-                  private Color targetColor;
-
-                  void Start()
-                  {
-                        paintImage = GetComponent<RawImage>();
-                        if (paintImage != null)
-                        {
-                              targetColor = paintImage.color;
-                              // Начинаем с полностью прозрачного цвета
-                              Color startColor = targetColor;
-                              startColor.a = 0f;
-                              paintImage.color = startColor;
-                        }
-                  }
-
-                  void Update()
-                  {
-                        if (paintImage != null && elapsedTime < fadeInTime)
-                        {
-                              elapsedTime += Time.deltaTime;
-                              float t = Mathf.Clamp01(elapsedTime / fadeInTime);
-
-                              // Интерполируем прозрачность от 0 до целевого значения
-                              Color currentColor = paintImage.color;
-                              currentColor.a = Mathf.Lerp(0f, targetColor.a, t);
-                              paintImage.color = currentColor;
-                        }
-                  }
-            }
-
-            // Обновленный метод для получения цвета краски
-            private Color GetPaintColor()
-            {
-                  // Используем синий материал, если он уже создан
-                  if (blueMaterial != null)
-                  {
-                        return blueMaterial.color;
-                  }
-
-                  // Выбираем яркий, насыщенный голубой цвет
-                  return new Color(0.1f, 0.4f, 1.0f, 1.0f);
-            }
-
-            // Метод для создания текстуры круга
-            private Texture2D CreateCircleTexture(int size, Color color)
-            {
-                  Texture2D texture = new Texture2D(size, size);
-                  Color[] colors = new Color[size * size];
-
-                  float radius = size / 2f;
-                  float radiusSq = radius * radius;
-
-                  for (int y = 0; y < size; y++)
-                  {
-                        for (int x = 0; x < size; x++)
-                        {
-                              int index = y * size + x;
-                              float dx = x - radius;
-                              float dy = y - radius;
-                              float distSq = dx * dx + dy * dy;
-
-                              // Создаем круг с мягкими краями
-                              if (distSq <= radiusSq)
-                              {
-                                    float dist = Mathf.Sqrt(distSq);
-                                    float alpha = 1.0f;
-
-                                    // Мягкая граница
-                                    if (dist > radius * 0.8f)
-                                    {
-                                          alpha = 1.0f - (dist - radius * 0.8f) / (radius * 0.2f);
-                                    }
-
-                                    colors[index] = new Color(color.r, color.g, color.b, alpha * color.a);
-                              }
-                              else
-                              {
-                                    colors[index] = Color.clear;
-                              }
-                        }
-                  }
-
-                  texture.SetPixels(colors);
-                  texture.Apply();
-
-                  return texture;
-            }
-
-            // Создаем панель для отображения сообщений пользователю
-            private void CreateMessagePanel()
-            {
-                  try
-                  {
-                        // Создаем объект панели
-                        messagePanel = new GameObject("Message Panel");
-                        messagePanel.transform.SetParent(transform);
-
-                        // Создаем канвас для UI элементов
-                        Canvas canvas = messagePanel.AddComponent<Canvas>();
-                        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                        canvas.sortingOrder = 10; // Поверх всего остального UI
-
-                        // Добавляем компоненты для масштабирования UI
-                        messagePanel.AddComponent<CanvasScaler>();
-                        messagePanel.AddComponent<GraphicRaycaster>();
-
-                        // Создаем фон для сообщения
-                        GameObject background = new GameObject("Message Background");
-                        background.transform.SetParent(messagePanel.transform, false);
-
-                        // Добавляем компонент изображения для фона
-                        Image bgImage = background.AddComponent<Image>();
-                        bgImage.color = new Color(0f, 0f, 0f, 0.7f); // Полупрозрачный черный
-
-                        // Настраиваем размер и позицию фона
-                        RectTransform bgRect = bgImage.rectTransform;
-                        bgRect.anchorMin = new Vector2(0.2f, 0.8f);
-                        bgRect.anchorMax = new Vector2(0.8f, 0.9f);
-                        bgRect.offsetMin = Vector2.zero;
-                        bgRect.offsetMax = Vector2.zero;
-
-                        // Создаем текст сообщения
-                        GameObject textObject = new GameObject("Message Text");
-                        textObject.transform.SetParent(background.transform, false);
-
-                        // Добавляем компонент текста
-                        Text messageText = textObject.AddComponent<Text>();
-                        messageText.text = ""; // Изначально пустой
-
-                        // Используем любой доступный шрифт вместо Arial.ttf
-                        Font font = null;
-
-                        // Пробуем загрузить новый системный шрифт
-                        try
-                        {
-                              font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                        }
-                        catch (System.Exception)
-                        {
-                              Debug.LogWarning("LegacyRuntime.ttf не найден, ищу другие шрифты");
-                        }
-
-                        // Если не найден, ищем любой шрифт в ресурсах проекта
-                        if (font == null)
-                        {
-                              Font[] fonts = Resources.FindObjectsOfTypeAll<Font>();
-                              if (fonts.Length > 0)
-                              {
-                                    font = fonts[0];
-                                    Debug.Log($"Использую первый доступный шрифт: {font.name}");
-                              }
-                        }
-
-                        // Назначаем шрифт, если нашли
-                        if (font != null)
-                        {
-                              messageText.font = font;
-                        }
-                        else
-                        {
-                              Debug.LogError("Не удалось найти ни одного шрифта!");
-                        }
-
-                        messageText.fontSize = 24;
-                        messageText.alignment = TextAnchor.MiddleCenter;
-                        messageText.color = Color.white;
-
-                        // Настраиваем размер и позицию текста
-                        RectTransform textRect = messageText.rectTransform;
-                        textRect.anchorMin = Vector2.zero;
-                        textRect.anchorMax = Vector2.one;
-                        textRect.offsetMin = new Vector2(10, 5);
-                        textRect.offsetMax = new Vector2(-10, -5);
-
-                        // Скрываем панель до момента, когда нужно показать сообщение
-                        messagePanel.SetActive(false);
-
-                        Debug.Log("Панель сообщений успешно создана");
-                  }
-                  catch (System.Exception e)
-                  {
-                        Debug.LogError($"Ошибка при создании панели сообщений: {e.Message}");
-
-                        // Если не удалось создать панель сообщений, создадим простую альтернативу
-                        CreateSimpleMessageDisplay();
-                  }
-            }
-
-            // Создаем простую альтернативу для сообщений
-            private void CreateSimpleMessageDisplay()
-            {
-                  Debug.Log("Создаю простую альтернативу для сообщений");
-
-                  // Создаем пустой объект для сообщений
-                  messagePanel = new GameObject("Simple Message Panel");
-                  messagePanel.transform.SetParent(transform);
-
-                  // Добавляем компонент TextMesh для отображения 3D текста в мире
-                  TextMesh textMesh = messagePanel.AddComponent<TextMesh>();
-                  textMesh.text = "";
-                  textMesh.fontSize = 24;
-                  textMesh.alignment = TextAlignment.Center;
-                  textMesh.anchor = TextAnchor.MiddleCenter;
-                  textMesh.color = Color.white;
-
-                  // Установим размер текста, чтобы он был виден
-                  textMesh.characterSize = 0.1f;
-
-                  // Добавим компонент для того, чтобы текст всегда смотрел в камеру
-                  messagePanel.AddComponent<Billboard>();
-
-                  // Скрываем объект до момента вывода сообщения
-                  messagePanel.SetActive(false);
-            }
-
-            // Отдельный класс для поворота объекта к камере
-            public class Billboard : MonoBehaviour
-            {
-                  private Camera targetCamera;
-                  private Transform cachedTransform;
-
-                  void Start()
-                  {
-                        targetCamera = Camera.main;
-                        cachedTransform = transform;
-
-                        if (targetCamera == null)
-                        {
-                              Debug.LogError("Billboard: Не найдена основная камера!");
-                              targetCamera = Camera.allCameras.Length > 0 ? Camera.allCameras[0] : null;
-
-                              if (targetCamera != null)
-                                    Debug.Log($"Billboard: Используется альтернативная камера {targetCamera.name}");
-                        }
-                  }
-
-                  void Update()
-                  {
-                        if (targetCamera == null)
-                        {
-                              targetCamera = Camera.main;
-                              if (targetCamera == null)
-                              {
-                                    return;
-                              }
-                        }
-
-                        // Принудительно поворачиваем лицом к камере
-                        Vector3 direction = targetCamera.transform.position - cachedTransform.position;
-
-                        // Если направление не нулевое
-                        if (direction != Vector3.zero)
-                        {
-                              // Поворачиваем маркер лицом к камере
-                              cachedTransform.rotation = Quaternion.LookRotation(-direction);
-                        }
-                  }
-
-                  void OnBecameInvisible()
-                  {
-                        // При исчезновении из вида камеры, выводим лог для отладки
-                        Debug.Log($"Billboard {name} стал невидимым для камеры");
-                  }
-
-                  void OnBecameVisible()
-                  {
-                        // При появлении в поле зрения камеры, выводим лог для отладки
-                        Debug.Log($"Billboard {name} стал видимым для камеры");
-                  }
-            }
-
-            // Метод для отображения сообщения (с поддержкой разных типов панелей)
-            private void ShowMessage(string message, float duration = 3f)
-            {
-                  // Если панель сообщений еще не создана, просто логируем сообщение
-                  if (messagePanel == null)
-                  {
-                        Debug.Log($"Сообщение (панель не создана): {message}");
-                        return;
-                  }
-
-                  try
-                  {
-                        // Активируем панель
-                        messagePanel.SetActive(true);
-
-                        // Сначала пробуем найти UI Text компонент
-                        Text uiText = messagePanel.GetComponentInChildren<Text>();
-                        if (uiText != null)
-                        {
-                              uiText.text = message;
-                        }
-                        else
-                        {
-                              // Если UI Text не найден, пробуем найти TextMesh
-                              TextMesh textMesh = messagePanel.GetComponentInChildren<TextMesh>();
-                              if (textMesh != null)
-                              {
-                                    textMesh.text = message;
-                              }
-                              else
-                              {
-                                    Debug.LogWarning($"Не найден компонент для отображения текста: {message}");
-                              }
-                        }
-
-                        // Останавливаем предыдущий корутин, если он был запущен
-                        if (messageCoroutine != null)
-                        {
-                              StopCoroutine(messageCoroutine);
-                        }
-
-                        // Запускаем корутин для скрытия сообщения через указанное время
-                        messageCoroutine = StartCoroutine(HideMessageAfterDelay(duration));
-                  }
-                  catch (System.Exception e)
-                  {
-                        Debug.LogError($"Ошибка при отображении сообщения: {e.Message}");
-                  }
-            }
-
-            // Корутина для скрытия сообщения
-            private IEnumerator HideMessageAfterDelay(float delay)
-            {
-                  yield return new WaitForSeconds(delay);
-                  messagePanel.SetActive(false);
-            }
-
-            // Новый метод для настройки расширенных параметров обнаружения стен
-            private void ConfigureAdvancedWallDetection(WallDetector detector)
-            {
-                  // Используем рефлексию для доступа к приватным полям класса WallDetector
-                  var cannyThreshold1Field = detector.GetType().GetField("cannyThreshold1", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var cannyThreshold2Field = detector.GetType().GetField("cannyThreshold2", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var houghThresholdField = detector.GetType().GetField("houghThreshold", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var minLineLengthField = detector.GetType().GetField("minLineLength", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var maxLineGapField = detector.GetType().GetField("maxLineGap", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var showPerformanceStatsField = detector.GetType().GetField("showPerformanceStats", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var processingIntervalField = detector.GetType().GetField("processingInterval", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var useGPUAccelerationField = detector.GetType().GetField("useGPUAcceleration", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var webcamDeviceIndexField = detector.GetType().GetField("webcamDeviceIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-
-                  // Оптимизируем параметры для обнаружения стен
-                  if (cannyThreshold1Field != null) cannyThreshold1Field.SetValue(detector, 30.0); // Более низкий порог для лучшего обнаружения краев
-                  if (cannyThreshold2Field != null) cannyThreshold2Field.SetValue(detector, 90.0); // Более низкий высокий порог
-                  if (houghThresholdField != null) houghThresholdField.SetValue(detector, 30); // Меньший порог для обнаружения линий
-                  if (minLineLengthField != null) minLineLengthField.SetValue(detector, 50.0); // Меньшая минимальная длина линии
-                  if (maxLineGapField != null) maxLineGapField.SetValue(detector, 20.0); // Больший допустимый разрыв между сегментами
-                  if (showPerformanceStatsField != null) showPerformanceStatsField.SetValue(detector, true); // Включаем статистику производительности
-                  if (processingIntervalField != null) processingIntervalField.SetValue(detector, 0.05f); // Обрабатываем кадры чаще
-                  if (useGPUAccelerationField != null) useGPUAccelerationField.SetValue(detector, true); // Используем GPU ускорение
-
-                  // Выбираем правильную камеру - индекс 0 для FaceTime, индекс 1 для iPhone
-                  if (webcamDeviceIndexField != null) webcamDeviceIndexField.SetValue(detector, 0); // Используем фронтальную камеру
-
-                  Debug.Log("Настроены оптимальные параметры для обнаружения контуров стен");
-            }
-
-            // Новый метод для точного вычисления границ стены на основе данных 3D точек
-            private Bounds CalculateWallBounds(WallData wallData)
-            {
-                  // Получаем размеры стены из данных
-                  Vector3 wallSize = wallData.scale;
-
-                  // Создаем 8 угловых точек стены
-                  Vector3 halfSize = wallSize * 0.5f;
-                  Vector3[] corners = new Vector3[8];
-
-                  corners[0] = new Vector3(-halfSize.x, -halfSize.y, -halfSize.z);
-                  corners[1] = new Vector3(halfSize.x, -halfSize.y, -halfSize.z);
-                  corners[2] = new Vector3(-halfSize.x, halfSize.y, -halfSize.z);
-                  corners[3] = new Vector3(halfSize.x, halfSize.y, -halfSize.z);
-                  corners[4] = new Vector3(-halfSize.x, -halfSize.y, halfSize.z);
-                  corners[5] = new Vector3(halfSize.x, -halfSize.y, halfSize.z);
-                  corners[6] = new Vector3(-halfSize.x, halfSize.y, halfSize.z);
-                  corners[7] = new Vector3(halfSize.x, halfSize.y, halfSize.z);
-
-                  // Применяем вращение и позицию стены к каждой точке
-                  for (int i = 0; i < corners.Length; i++)
-                  {
-                        corners[i] = wallData.rotation * corners[i] + wallData.position;
-                  }
-
-                  // Создаем ограничивающий бокс
-                  Bounds bounds = new Bounds(corners[0], Vector3.zero);
-                  foreach (Vector3 corner in corners)
-                  {
-                        bounds.Encapsulate(corner);
-                  }
-
-                  return bounds;
-            }
-
-            // Новый метод для эффекта реалистичной покраски на текстуре стены
-            private void PaintWallTexture(GameObject wall, Color paintColor)
-            {
-                  // Получаем или создаем рендерер для стены
-                  Renderer renderer = wall.GetComponent<Renderer>();
-                  if (renderer == null) return;
-
-                  // Проверяем текущий материал
-                  Material currentMaterial = renderer.material;
-                  if (currentMaterial == null) return;
-
-                  // Создаем новый материал на основе Standard Shader для лучшего визуального эффекта
-                  Material newMaterial = new Material(Shader.Find("Standard"));
-
-                  // Копируем базовые свойства из текущего материала, если они есть
-                  if (currentMaterial.HasProperty("_Color"))
-                  {
-                        newMaterial.color = currentMaterial.color;
-                  }
-
-                  // Если у стены нет текстуры, создаем новую реалистичную текстуру стены
-                  Texture2D currentTexture = currentMaterial.mainTexture as Texture2D;
-                  if (currentTexture == null || !currentMaterial.HasProperty("_MainTex"))
-                  {
-                        // Создаем текстуру для стены с базовым паттерном
-                        Texture2D wallTexture = CreateRealisticWallTexture(1024, 1024);
-                        currentTexture = wallTexture;
-                  }
-                  else
-                  {
-                        // Если текстура существует, создаем ее копию для модификации
-                        currentTexture = CopyTexture(currentTexture);
-                  }
-
-                  // Применяем эффект покраски
-                  Texture2D paintedTexture = ApplyPaintLayerToTexture(currentTexture, paintColor);
-
-                  // Добавляем глянец и металличность для эффекта свежей краски
-                  newMaterial.SetFloat("_Glossiness", 0.6f);
-                  newMaterial.SetFloat("_Metallic", 0.2f);
-
-                  // Добавляем свечение для выделения покрашенной поверхности
-                  newMaterial.EnableKeyword("_EMISSION");
-                  newMaterial.SetColor("_EmissionColor", paintColor * 0.3f);
-
-                  // Устанавливаем текстуру
-                  newMaterial.mainTexture = paintedTexture;
-
-                  // Применяем новый материал к объекту
-                  renderer.material = newMaterial;
-
-                  // Сохраняем материал и для будущего использования
-                  if (blueMaterial == null)
-                  {
-                        blueMaterial = newMaterial;
-                  }
-
-                  Debug.Log($"Применен реалистичный эффект покраски к объекту {wall.name}");
-            }
-
-            // Новый метод для создания реалистичной текстуры стены
-            private Texture2D CreateRealisticWallTexture(int width, int height)
-            {
-                  Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-                  Color[] pixels = new Color[width * height];
-
-                  // Базовый цвет стены (светло-серый)
-                  Color baseColor = new Color(0.9f, 0.9f, 0.9f, 1.0f);
-
-                  // Добавляем шум Перлина для эффекта неровности стены
-                  float scale1 = 0.03f; // Крупный шум для основной текстуры
-                  float scale2 = 0.2f;  // Мелкий шум для деталей
-
-                  for (int y = 0; y < height; y++)
-                  {
-                        for (int x = 0; x < width; x++)
-                        {
-                              int index = y * width + x;
-
-                              // Генерируем многослойный шум Перлина для реалистичной текстуры
-                              float noise1 = Mathf.PerlinNoise(x * scale1, y * scale1);
-                              float noise2 = Mathf.PerlinNoise(x * scale2, y * scale2);
-
-                              // Комбинируем шум разных масштабов
-                              float combinedNoise = (noise1 * 0.7f + noise2 * 0.3f);
-
-                              // Преобразуем в диапазон 0.85-1.0 для легкой вариации цвета
-                              float colorVariation = 0.85f + combinedNoise * 0.15f;
-
-                              // Создаем цвет пикселя с небольшими вариациями оттенка
-                              pixels[index] = new Color(
-                                    baseColor.r * colorVariation,
-                                    baseColor.g * colorVariation,
-                                    baseColor.b * colorVariation,
-                                    1.0f
-                              );
-
-                              // Добавляем случайные "дефекты" стены для реализма
-                              if (Random.Range(0f, 1f) < 0.001f)
-                              {
-                                    // Небольшие темные точки или царапины
-                                    pixels[index] = new Color(
-                                          baseColor.r * 0.7f,
-                                          baseColor.g * 0.7f,
-                                          baseColor.b * 0.7f,
-                                          1.0f
-                                    );
-                              }
-                        }
-                  }
-
-                  texture.SetPixels(pixels);
-                  texture.Apply();
-
-                  return texture;
-            }
-
-            // Метод для нанесения слоя краски на текстуру
-            private Texture2D ApplyPaintLayerToTexture(Texture2D baseTexture, Color paintColor)
-            {
-                  // Создаем копию исходной текстуры
-                  Texture2D paintedTexture = CopyTexture(baseTexture);
-                  int width = paintedTexture.width;
-                  int height = paintedTexture.height;
-                  Color[] pixels = paintedTexture.GetPixels();
-
-                  // Создаем маску покраски с неравномерным покрытием для реализма
-                  float[,] paintMask = new float[width, height];
-
-                  // Инициализируем маску базовым покрытием 
-                  for (int y = 0; y < height; y++)
-                  {
-                        for (int x = 0; x < width; x++)
-                        {
-                              // Базовое покрытие с шумом для неравномерности
-                              float noise = Mathf.PerlinNoise(x * 0.01f, y * 0.01f);
-                              paintMask[x, y] = 0.7f + noise * 0.3f; // 70-100% покрытия
-
-                              // Добавляем мелкие пузырьки воздуха (места, где краска не легла)
-                              if (Random.Range(0f, 1f) < 0.005f)
-                              {
-                                    // Создаем маленький пузырек
-                                    int bubbleSize = Random.Range(1, 4);
-                                    for (int by = -bubbleSize; by <= bubbleSize; by++)
-                                    {
-                                          for (int bx = -bubbleSize; bx <= bubbleSize; bx++)
-                                          {
-                                                int px = x + bx;
-                                                int py = y + by;
-                                                if (px >= 0 && px < width && py >= 0 && py < height)
-                                                {
-                                                      float dist = Mathf.Sqrt(bx * bx + by * by);
-                                                      if (dist <= bubbleSize)
-                                                      {
-                                                            // Уменьшаем покрытие в области пузырька
-                                                            paintMask[px, py] *= (dist / bubbleSize);
-                                                      }
-                                                }
-                                          }
-                                    }
-                              }
-
-                              // Создаем подтеки краски в случайных местах
-                              if (Random.Range(0f, 1f) < 0.0005f && y < height - 20)
-                              {
-                                    // Длина подтека
-                                    int dripsLength = Random.Range(10, 30);
-                                    float dripWidth = Random.Range(1f, 3f);
-
-                                    // Создаем подтек вниз
-                                    for (int dy = 0; dy < dripsLength; dy++)
-                                    {
-                                          int py = y + dy;
-                                          if (py < height)
-                                          {
-                                                // Ширина подтека уменьшается книзу
-                                                float currentWidth = dripWidth * (1f - (float)dy / dripsLength);
-
-                                                for (int dx = -Mathf.FloorToInt(currentWidth); dx <= Mathf.CeilToInt(currentWidth); dx++)
-                                                {
-                                                      int px = x + dx;
-                                                      if (px >= 0 && px < width)
-                                                      {
-                                                            // Интенсивность подтека уменьшается к краям и книзу
-                                                            float intensity = (1f - Mathf.Abs(dx) / currentWidth) * (1f - (float)dy / dripsLength);
-                                                            paintMask[px, py] = Mathf.Max(paintMask[px, py], intensity * 0.9f);
-                                                      }
-                                                }
-                                          }
-                                    }
-                              }
-                        }
-                  }
-
-                  // Применяем маску покраски к текстуре
-                  for (int y = 0; y < height; y++)
-                  {
-                        for (int x = 0; x < width; x++)
-                        {
-                              int index = y * width + x;
-
-                              // Вычисляем новый цвет пикселя с учетом маски покраски
-                              float coverage = paintMask[x, y];
-                              Color pixelColor = Color.Lerp(pixels[index], paintColor, coverage);
-
-                              // Добавляем небольшие вариации в оттенок для реалистичности
-                              float hueVariation = (Mathf.PerlinNoise(x * 0.05f, y * 0.05f) - 0.5f) * 0.05f;
-                              float satVariation = (Mathf.PerlinNoise(x * 0.03f, y * 0.03f) - 0.5f) * 0.05f;
-
-                              // Преобразуем в HSV для изменения оттенка
-                              float h, s, v;
-                              Color.RGBToHSV(pixelColor, out h, out s, out v);
-
-                              // Применяем вариации
-                              h += hueVariation;
-                              s += satVariation;
-                              h = Mathf.Repeat(h, 1f); // Оттенок должен быть в диапазоне 0-1
-                              s = Mathf.Clamp01(s);    // Насыщенность должна быть в диапазоне 0-1
-
-                              // Преобразуем обратно в RGB
-                              pixelColor = Color.HSVToRGB(h, s, v);
-
-                              // Устанавливаем новый цвет пикселя
-                              pixels[index] = pixelColor;
-                        }
-                  }
-
-                  paintedTexture.SetPixels(pixels);
-                  paintedTexture.Apply();
-
-                  return paintedTexture;
-            }
-
-            // Метод для копирования текстуры
-            private Texture2D CopyTexture(Texture2D source)
-            {
-                  // Создаем копию текстуры с теми же размерами и форматом
-                  RenderTexture renderTex = RenderTexture.GetTemporary(
-                        source.width,
-                        source.height,
-                        0,
-                        RenderTextureFormat.ARGB32
-                  );
-
-                  // Копируем исходную текстуру в рендертекстуру
-                  Graphics.Blit(source, renderTex);
-
-                  // Запоминаем текущую активную рендертекстуру
-                  RenderTexture previous = RenderTexture.active;
-                  RenderTexture.active = renderTex;
-
-                  // Создаем новую текстуру и считываем пиксели из рендертекстуры
-                  Texture2D copy = new Texture2D(source.width, source.height, TextureFormat.RGBA32, false);
-                  copy.ReadPixels(new UnityEngine.Rect(0, 0, source.width, source.height), 0, 0);
-                  copy.Apply();
-
-                  // Восстанавливаем предыдущую активную рендертекстуру
-                  RenderTexture.active = previous;
-                  RenderTexture.ReleaseTemporary(renderTex);
-
-                  return copy;
-            }
-
-            // Метод для нанесения эффекта покраски на текстуру
-            private void ApplyPaintEffectToTexture(Texture2D texture, Color paintColor)
-            {
-                  int width = texture.width;
-                  int height = texture.height;
-                  Color[] pixels = texture.GetPixels();
-
-                  // Применяем эффект покраски с шумом Перлина для реалистичности
-                  for (int y = 0; y < height; y++)
-                  {
-                        for (int x = 0; x < width; x++)
-                        {
-                              int index = y * width + x;
-
-                              // Добавляем шум Перлина для естественного эффекта
-                              float noise = Mathf.PerlinNoise(x * 0.01f, y * 0.01f);
-                              float edgeNoise = Mathf.PerlinNoise(x * 0.05f, y * 0.05f);
-
-                              // Смешиваем цвет покраски с базовым цветом текстуры и добавляем вариации
-                              Color pixelColor = Color.Lerp(pixels[index], paintColor, 0.9f + edgeNoise * 0.1f);
-
-                              // Добавляем вариации яркости для реализма
-                              float brightnessVariation = 0.95f + noise * 0.1f;
-                              pixelColor = new Color(
-                                    pixelColor.r * brightnessVariation,
-                                    pixelColor.g * brightnessVariation,
-                                    pixelColor.b * brightnessVariation,
-                                    1.0f
-                              );
-
-                              pixels[index] = pixelColor;
-                        }
-                  }
-
-                  // Применяем изменения к текстуре
-                  texture.SetPixels(pixels);
-                  texture.Apply();
-            }
-
-            // Метод для отображения визуальной обратной связи при клике
+            // Метод для отображения визуального отклика при клике
             private void ShowClickFeedback(Vector2 screenPosition)
             {
-                  // Создаем временный UI элемент для обратной связи о клике
-                  GameObject feedbackObj = new GameObject("ClickFeedback");
-                  feedbackObj.transform.SetParent(transform);
+                  // Создаем временный объект для визуального эффекта
+                  GameObject clickEffect = new GameObject("ClickFeedback");
 
-                  // Создаем Canvas для отображения эффекта
-                  Canvas canvas = feedbackObj.AddComponent<Canvas>();
-                  canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                  canvas.sortingOrder = 100; // Отображаем поверх всего
-
-                  // Добавляем изображение для обратной связи
-                  GameObject imageObj = new GameObject("FeedbackImage");
-                  imageObj.transform.SetParent(canvas.transform, false);
-
-                  Image feedbackImage = imageObj.AddComponent<Image>();
-
-                  // Создаем текстуру круга для эффекта клика
-                  Texture2D circleTexture = CreateCircleTexture(128, new Color(1f, 1f, 1f, 0.7f));
-                  Sprite circleSprite = Sprite.Create(
-                        circleTexture,
-                        new UnityEngine.Rect(0, 0, circleTexture.width, circleTexture.height),
-                        new Vector2(0.5f, 0.5f)
-                  );
-
-                  feedbackImage.sprite = circleSprite;
-                  feedbackImage.color = new Color(0.2f, 0.9f, 1f, 0.8f);
-
-                  // Устанавливаем позицию и размер
-                  RectTransform rectTransform = feedbackImage.rectTransform;
-                  rectTransform.anchoredPosition = screenPosition - new Vector2(Screen.width / 2, Screen.height / 2);
-                  rectTransform.sizeDelta = new Vector2(100, 100);
-
-                  // Добавляем анимацию затухания
-                  ClickFeedbackAnimation animation = feedbackObj.AddComponent<ClickFeedbackAnimation>();
-                  animation.duration = 0.5f;
-
-                  // Автоматически уничтожаем объект через 0.5 секунды
-                  Destroy(feedbackObj, 0.5f);
-            }
-
-            // Класс для анимации эффекта клика
-            public class ClickFeedbackAnimation : MonoBehaviour
-            {
-                  public float duration = 0.5f;
-                  private float elapsedTime = 0f;
-                  private Image feedbackImage;
-                  private RectTransform rectTransform;
-
-                  void Start()
+                  // Находим или создаем канвас
+                  Canvas canvas = FindObjectOfType<Canvas>();
+                  if (canvas == null)
                   {
-                        feedbackImage = GetComponentInChildren<Image>();
-                        if (feedbackImage != null)
-                        {
-                              rectTransform = feedbackImage.rectTransform;
-                        }
+                        GameObject canvasObj = new GameObject("Canvas");
+                        canvas = canvasObj.AddComponent<Canvas>();
+                        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                        canvasObj.AddComponent<CanvasScaler>();
+                        canvasObj.AddComponent<GraphicRaycaster>();
                   }
 
-                  void Update()
+                  clickEffect.transform.SetParent(canvas.transform, false);
+
+                  // Добавляем компоненты
+                  RectTransform rectTransform = clickEffect.AddComponent<RectTransform>();
+                  Image image = clickEffect.AddComponent<Image>();
+
+                  // Создаем текстуру для эффекта клика
+                  image.sprite = CreateCircleSprite(64, Color.white);
+                  image.color = new Color(1, 1, 1, 0.5f);
+
+                  // Настраиваем позицию и размер
+                  rectTransform.anchorMin = new Vector2(0, 0);
+                  rectTransform.anchorMax = new Vector2(0, 0);
+                  rectTransform.pivot = new Vector2(0.5f, 0.5f);
+                  rectTransform.sizeDelta = new Vector2(50, 50);
+                  rectTransform.position = screenPosition;
+
+                  // Запускаем анимацию затухания
+                  StartCoroutine(FadeOutClickEffect(clickEffect));
+
+                  // Удаляем эффект через короткое время
+                  Destroy(clickEffect, 0.5f);
+            }
+
+            // Корутина для эффекта затухания клика
+            private IEnumerator FadeOutClickEffect(GameObject effect)
+            {
+                  Image image = effect.GetComponent<Image>();
+                  if (image == null) yield break;
+
+                  float duration = 0.4f;
+                  float elapsed = 0f;
+
+                  Color startColor = image.color;
+                  Vector2 startSize = effect.GetComponent<RectTransform>().sizeDelta;
+                  Vector2 targetSize = startSize * 2.0f;
+
+                  while (elapsed < duration)
                   {
-                        elapsedTime += Time.deltaTime;
-                        float t = elapsedTime / duration;
+                        float t = elapsed / duration;
 
-                        if (feedbackImage != null)
-                        {
-                              // Уменьшаем прозрачность со временем
-                              Color color = feedbackImage.color;
-                              color.a = Mathf.Lerp(0.8f, 0f, t);
-                              feedbackImage.color = color;
+                        // Уменьшаем прозрачность
+                        float alpha = Mathf.Lerp(startColor.a, 0f, t);
+                        image.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
 
-                              // Увеличиваем размер
-                              float scale = Mathf.Lerp(1f, 2f, t);
-                              rectTransform.localScale = new Vector3(scale, scale, 1f);
-                        }
+                        // Увеличиваем размер
+                        effect.GetComponent<RectTransform>().sizeDelta = Vector2.Lerp(startSize, targetSize, t);
+
+                        elapsed += Time.deltaTime;
+                        yield return null;
                   }
             }
 
-            // Метод для создания панели с инструкцией для пользователя
-            private void CreateHelpPanel()
+            // Метод для обновления видимости маркеров стен
+            private void UpdateWallMarkersVisibility(bool visible)
             {
-                  // Создаем родительский объект для UI
-                  GameObject helpPanel = new GameObject("HelpPanel");
-
-                  // Создаем канвас для UI
-                  Canvas canvas = helpPanel.AddComponent<Canvas>();
-                  canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                  canvas.sortingOrder = 10;
-                  helpPanel.AddComponent<CanvasScaler>();
-                  helpPanel.AddComponent<GraphicRaycaster>();
-
-                  // Создаем панель с инструкцией
-                  GameObject panel = new GameObject("InstructionPanel");
-                  panel.transform.SetParent(canvas.transform, false);
-
-                  // Добавляем фон
-                  Image panelImage = panel.AddComponent<Image>();
-                  panelImage.color = new Color(0, 0, 0, 0.8f); // Почти непрозрачный черный
-
-                  // Настраиваем размер и позицию панели - вертикальная панель слева
-                  RectTransform panelRect = panelImage.rectTransform;
-                  panelRect.anchorMin = new Vector2(0.01f, 0.2f);
-                  panelRect.anchorMax = new Vector2(0.25f, 0.9f);
-                  panelRect.pivot = new Vector2(0.5f, 0.5f);
-                  panelRect.offsetMin = Vector2.zero;
-                  panelRect.offsetMax = Vector2.zero;
-
-                  // Добавляем заголовок
-                  GameObject titleObj = new GameObject("TitleText");
-                  titleObj.transform.SetParent(panel.transform, false);
-
-                  Text titleText = titleObj.AddComponent<Text>();
-                  titleText.text = "DULUX VISUALIZER";
-                  titleText.color = new Color(1f, 0.8f, 0.2f); // Золотистый цвет
-                  titleText.fontSize = 28;
-                  titleText.fontStyle = FontStyle.Bold;
-                  titleText.alignment = TextAnchor.UpperCenter;
-
-                  // Настраиваем размер и позицию заголовка
-                  RectTransform titleRect = titleText.rectTransform;
-                  titleRect.anchorMin = new Vector2(0.05f, 0.9f);
-                  titleRect.anchorMax = new Vector2(0.95f, 1.0f);
-                  titleRect.pivot = new Vector2(0.5f, 1.0f);
-                  titleRect.offsetMin = Vector2.zero;
-                  titleRect.offsetMax = Vector2.zero;
-
-                  // Добавляем текст инструкции
-                  GameObject textObj = new GameObject("HelpText");
-                  textObj.transform.SetParent(panel.transform, false);
-
-                  Text helpText = textObj.AddComponent<Text>();
-                  helpText.text =
-                        "УПРАВЛЕНИЕ:\n\n" +
-                        "[ T ] - создать тестовые стены\n\n" +
-                        "[ ПРОБЕЛ ] - покрасить все стены\n\n" +
-                        "[ F1 ] - создать одну стену\n\n" +
-                        "[ C ] - переключить камеру\n\n\n" +
-                        "Если стены не видны, нажмите\nклавишу T для их пересоздания\n\n" +
-                        "Камера показана в нижнем\nправом углу экрана";
-
-                  helpText.color = Color.white;
-                  helpText.fontSize = 20;
-                  helpText.fontStyle = FontStyle.Bold;
-                  helpText.alignment = TextAnchor.UpperLeft;
-                  helpText.lineSpacing = 1.2f; // Увеличиваем интервал между строками
-
-                  // Настраиваем размер и позицию текста
-                  RectTransform textRect = helpText.rectTransform;
-                  textRect.anchorMin = new Vector2(0.05f, 0.1f);
-                  textRect.anchorMax = new Vector2(0.95f, 0.85f);
-                  textRect.pivot = new Vector2(0.5f, 0.5f);
-                  textRect.offsetMin = Vector2.zero;
-                  textRect.offsetMax = Vector2.zero;
-
-                  // Добавляем контрастную рамку вокруг панели
-                  GameObject border = new GameObject("PanelBorder");
-                  border.transform.SetParent(panel.transform, false);
-                  border.transform.SetAsFirstSibling(); // Помещаем под остальными элементами
-
-                  Image borderImage = border.AddComponent<Image>();
-                  borderImage.color = new Color(1f, 0.8f, 0.2f, 0.7f); // Золотистая рамка
-
-                  RectTransform borderRect = borderImage.rectTransform;
-                  borderRect.anchorMin = new Vector2(0, 0);
-                  borderRect.anchorMax = new Vector2(1, 1);
-                  borderRect.offsetMin = new Vector2(-3, -3);
-                  borderRect.offsetMax = new Vector2(3, 3);
-
-                  // Добавляем кнопку скрытия/показа панели
-                  GameObject toggleButton = new GameObject("ToggleButton");
-                  toggleButton.transform.SetParent(panel.transform, false);
-
-                  Image buttonImage = toggleButton.AddComponent<Image>();
-                  buttonImage.color = new Color(1f, 0f, 0f, 0.8f); // Ярко-красный
-
-                  // Настраиваем размер и позицию кнопки
-                  RectTransform buttonRect = buttonImage.rectTransform;
-                  buttonRect.anchorMin = new Vector2(1, 1);
-                  buttonRect.anchorMax = new Vector2(1, 1);
-                  buttonRect.pivot = new Vector2(1, 1);
-                  buttonRect.sizeDelta = new Vector2(40, 40);
-                  buttonRect.anchoredPosition = new Vector2(-5, -5);
-
-                  // Добавляем обработчик нажатия
-                  Button button = toggleButton.AddComponent<Button>();
-                  button.targetGraphic = buttonImage;
-
-                  // Создаем эффект при наведении
-                  ColorBlock colors = button.colors;
-                  colors.highlightedColor = new Color(1f, 0.5f, 0.5f);
-                  colors.pressedColor = new Color(0.7f, 0f, 0f);
-                  button.colors = colors;
-
-                  // Создаем текст для кнопки
-                  GameObject buttonTextObj = new GameObject("ButtonText");
-                  buttonTextObj.transform.SetParent(toggleButton.transform, false);
-
-                  Text buttonText = buttonTextObj.AddComponent<Text>();
-                  buttonText.text = "X";
-                  buttonText.color = Color.white;
-                  buttonText.fontSize = 24;
-                  buttonText.alignment = TextAnchor.MiddleCenter;
-                  buttonText.fontStyle = FontStyle.Bold;
-
-                  // Настраиваем размер и позицию текста кнопки
-                  RectTransform buttonTextRect = buttonText.rectTransform;
-                  buttonTextRect.anchorMin = new Vector2(0, 0);
-                  buttonTextRect.anchorMax = new Vector2(1, 1);
-                  buttonTextRect.pivot = new Vector2(0.5f, 0.5f);
-                  buttonTextRect.offsetMin = Vector2.zero;
-                  buttonTextRect.offsetMax = Vector2.zero;
-
-                  // Добавляем обработчик нажатия
-                  button.onClick.AddListener(() =>
+                  foreach (var marker in wallMarkers)
                   {
-                        // При первом скрытии запоминаем позицию и уменьшаем панель
-                        if (helpText.gameObject.activeSelf)
+                        if (marker != null)
                         {
-                              // Сохраняем текущее положение панели
-                              Vector2 currentAnchorMin = panelRect.anchorMin;
-                              Vector2 currentAnchorMax = panelRect.anchorMax;
-
-                              // Сворачиваем панель до маленького значка в верхнем левом углу
-                              panelRect.anchorMin = new Vector2(0.01f, 0.85f);
-                              panelRect.anchorMax = new Vector2(0.07f, 0.95f);
-
-                              // Скрываем все элементы, кроме кнопки
-                              helpText.gameObject.SetActive(false);
-                              titleText.gameObject.SetActive(false);
-
-                              // Меняем текст кнопки
-                              buttonText.text = "?";
+                              marker.SetActive(visible);
                         }
-                        else
-                        {
-                              // Восстанавливаем полный размер панели
-                              panelRect.anchorMin = new Vector2(0.01f, 0.2f);
-                              panelRect.anchorMax = new Vector2(0.25f, 0.9f);
-
-                              // Показываем все элементы
-                              helpText.gameObject.SetActive(true);
-                              titleText.gameObject.SetActive(true);
-
-                              // Возвращаем текст кнопки
-                              buttonText.text = "X";
-                        }
-                  });
-
-                  Debug.Log("Создана панель с инструкцией для пользователя");
-
-                  // Через 30 секунд автоматически сворачиваем панель
-                  StartCoroutine(AutoCollapseHelpPanel(button, 30f));
-            }
-
-            // Корутина для автоматического сворачивания панели подсказок через указанное время
-            private IEnumerator AutoCollapseHelpPanel(Button collapseButton, float delay)
-            {
-                  yield return new WaitForSeconds(delay);
-                  collapseButton.onClick.Invoke();
-            }
-
-            private IEnumerator HidePanelAfterDelay(GameObject panel, float delay)
-            {
-                  yield return new WaitForSeconds(delay);
-                  panel.SetActive(false);
-            }
-
-            // Метод для поворота камеры в правильное положение, чтобы увидеть тестовые стены
-            private void RotateCameraToFaceTestWalls()
-            {
-                  if (mainCamera == null) return;
-
-                  // Устанавливаем стандартную позицию для просмотра тестовых стен
-                  Vector3 bestPosition = new Vector3(0, 1.7f, 0); // Примерно в центре комнаты, на уровне глаз человека
-                  mainCamera.transform.position = bestPosition;
-
-                  // Устанавливаем стандартный поворот, смотрящий вперед на переднюю стену комнаты
-                  mainCamera.transform.rotation = Quaternion.Euler(0, 0, 0);
-
-                  // Добавим компонент управления камерой, если его нет
-                  SimpleCameraController cameraController = mainCamera.GetComponent<SimpleCameraController>();
-                  if (cameraController == null)
-                  {
-                        cameraController = mainCamera.gameObject.AddComponent<SimpleCameraController>();
-                  }
-
-                  // Показываем подсказку пользователю
-                  ShowMessage("Камера установлена в центр тестовой комнаты. Используйте WASD для перемещения и стрелки для поворота.", 7.0f);
-
-                  Debug.Log($"Камера установлена в оптимальную позицию {mainCamera.transform.position} с поворотом {mainCamera.transform.rotation.eulerAngles}");
-            }
-
-            // Метод для переключения между доступными камерами
-            private void ToggleCamera()
-            {
-                  if (wallDetector == null) return;
-
-                  // Используем рефлексию для доступа к приватным полям класса WallDetector
-                  var webcamDeviceIndexField = wallDetector.GetType().GetField("webcamDeviceIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-
-                  if (webcamDeviceIndexField != null)
-                  {
-                        int currentIndex = (int)webcamDeviceIndexField.GetValue(wallDetector);
-                        int newIndex = currentIndex == 0 ? 1 : 0; // Переключаемся между камерами 0 и 1
-
-                        webcamDeviceIndexField.SetValue(wallDetector, newIndex);
-
-                        // Перезапускаем определение стен для применения изменений
-                        wallDetector.StopDetection();
-                        wallDetector.StartDetection();
-
-                        string cameraName = newIndex == 0 ? "фронтальную (FaceTime)" : "заднюю (iPhone)";
-                        ShowMessage($"Переключено на {cameraName} камеру", 2f);
-                        Debug.Log($"Переключение на камеру с индексом {newIndex}");
                   }
             }
 
-            // Метод для добавления заметной текстовой метки на стену
-            private void AddWallLabel(Transform parent, WallData wall)
-            {
-                  // Создаем объект для текста
-                  GameObject labelObj = new GameObject("WallLabel");
-                  labelObj.transform.SetParent(parent);
-
-                  // Смещаем немного вперед, чтобы текст был перед стеной
-                  labelObj.transform.localPosition = new Vector3(0, 0, -0.1f);
-
-                  // Добавляем TextMesh компонент
-                  TextMesh textMesh = labelObj.AddComponent<TextMesh>();
-                  textMesh.text = $"СТЕНА #{parent.parent.childCount}\nРазмер: {wall.scale.x:F1}x{wall.scale.y:F1}м\nНажмите ПРОБЕЛ для покраски";
-                  textMesh.fontSize = 100; // Очень крупный шрифт
-                  textMesh.alignment = TextAlignment.Center;
-                  textMesh.anchor = TextAnchor.MiddleCenter;
-                  textMesh.color = Color.yellow; // Яркий цвет
-
-                  // Увеличиваем размер символов
-                  textMesh.characterSize = 0.05f;
-
-                  // Добавляем компонент для поворота к камере
-                  labelObj.AddComponent<Billboard>();
-            }
-
-            // Метод для отображения очень большого заметного сообщения на экране
-            private void ShowBigScreenMessage(string message, float duration = 5.0f)
-            {
-                  // Создаем родительский объект для сообщения
-                  GameObject messageObj = new GameObject("BigScreenMessage");
-
-                  // Добавляем Canvas
-                  Canvas canvas = messageObj.AddComponent<Canvas>();
-                  canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                  canvas.sortingOrder = 999; // Отображать поверх всего
-
-                  // Добавляем компоненты для корректной работы Canvas
-                  messageObj.AddComponent<CanvasScaler>();
-                  messageObj.AddComponent<GraphicRaycaster>();
-
-                  // Создаем фон
-                  GameObject background = new GameObject("Background");
-                  background.transform.SetParent(canvas.transform, false);
-
-                  // Добавляем Image компонент для фона
-                  Image bgImage = background.AddComponent<Image>();
-                  bgImage.color = new Color(0, 0, 0, 0.7f); // Полупрозрачный черный фон
-
-                  // Настраиваем размер фона на весь экран
-                  RectTransform bgRect = bgImage.rectTransform;
-                  bgRect.anchorMin = new Vector2(0.2f, 0.7f);  // Показываем только в верхней части экрана
-                  bgRect.anchorMax = new Vector2(0.8f, 0.95f);
-                  bgRect.offsetMin = Vector2.zero;
-                  bgRect.offsetMax = Vector2.zero;
-
-                  // Создаем текст
-                  GameObject textObj = new GameObject("MessageText");
-                  textObj.transform.SetParent(background.transform, false);
-
-                  // Добавляем Text компонент
-                  Text text = textObj.AddComponent<Text>();
-                  text.text = message;
-                  text.fontSize = 28; // Хороший размер шрифта
-                  text.fontStyle = FontStyle.Bold;
-                  text.alignment = TextAnchor.MiddleCenter;
-                  text.color = Color.white;
-
-                  // Настраиваем размер текста по центру экрана
-                  RectTransform textRect = text.rectTransform;
-                  textRect.anchorMin = new Vector2(0.05f, 0.05f);
-                  textRect.anchorMax = new Vector2(0.95f, 0.95f);
-                  textRect.offsetMin = Vector2.zero;
-                  textRect.offsetMax = Vector2.zero;
-
-                  // Автоматически уничтожаем объект через указанное время
-                  Destroy(messageObj, duration);
-
-                  Debug.Log($"<color=red><b>ВАЖНОЕ СООБЩЕНИЕ:</b> {message}</color>");
-            }
-
-            // Метод для настройки отображения контуров на видеопотоке камеры
-            private void EnableContoursOnCamera(WallDetector detector)
-            {
-                  // Используем рефлексию для доступа к приватным полям
-                  var showDebugLinesField = detector.GetType().GetField("showDebugLines", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var debugLineColorField = detector.GetType().GetField("debugLineColor", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var debugLineThicknessField = detector.GetType().GetField("debugLineThickness", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                  var fillContoursField = detector.GetType().GetField("fillContours", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-
-                  // Устанавливаем параметры отображения
-                  if (showDebugLinesField != null)
-                        showDebugLinesField.SetValue(detector, true); // Включаем отображение контуров
-
-                  if (debugLineColorField != null)
-                        debugLineColorField.SetValue(detector, Color.magenta); // Яркий цвет для линий
-
-                  if (debugLineThicknessField != null)
-                        debugLineThicknessField.SetValue(detector, 5); // Толстые линии
-
-                  if (fillContoursField != null)
-                        fillContoursField.SetValue(detector, true); // Заполнять контуры цветом
-
-                  Debug.Log("Включено отображение контуров на видеопотоке камеры");
-            }
-
-            // Метод для переключения режима отображения камеры
+            // Метод для установки режима отображения камеры
             public void SetCameraViewMode(bool fullscreen)
             {
+                  if (cameraPreview == null) return;
+
                   isFullScreenCamera = fullscreen;
 
-                  if (cameraPreview == null)
-                  {
-                        Debug.LogWarning("Camera preview is not available");
-                        return;
-                  }
-
+                  // Get the rect transform of the camera preview
                   RectTransform rectTransform = cameraPreview.GetComponent<RectTransform>();
-                  if (rectTransform == null)
-                  {
-                        Debug.LogWarning("RectTransform not found on camera preview");
-                        return;
-                  }
-
-                  // Сохраняем текущий масштаб без изменения
-                  Vector3 currentScale = rectTransform.localScale;
+                  if (rectTransform == null) return;
 
                   if (fullscreen)
                   {
-                        // Полноэкранный режим:
-                        // - Размер на весь экран
-                        // - Позиция по центру
-                        // - Более прозрачный для видимости стен
-                        rectTransform.anchorMin = Vector2.zero;
-                        rectTransform.anchorMax = Vector2.one;
-                        rectTransform.sizeDelta = Vector2.zero;
-                        rectTransform.anchoredPosition = Vector2.zero;
-                        cameraPreview.color = new Color(1, 1, 1, 0.7f); // Полупрозрачный для видимости стен
+                        // Full-screen mode
+                        rectTransform.anchorMin = new Vector2(0, 0);
+                        rectTransform.anchorMax = new Vector2(1, 1);
+                        rectTransform.offsetMin = Vector2.zero;
+                        rectTransform.offsetMax = Vector2.zero;
 
-                        // Обновляем видимость маркеров стен
-                        UpdateWallMarkersVisibility(true);
-
-                        ShowMessage("Полноэкранный режим камеры", 1.5f);
+                        // Full opacity
+                        cameraPreview.color = Color.white;
                   }
                   else
                   {
-                        // Режим предпросмотра:
-                        // - Маленький размер в углу
-                        // - Меньший приоритет отображения
-                        rectTransform.anchorMin = new Vector2(0.7f, 0);
-                        rectTransform.anchorMax = new Vector2(1, 0.3f);
-                        rectTransform.sizeDelta = Vector2.zero;
-                        rectTransform.anchoredPosition = Vector2.zero;
-                        cameraPreview.color = Color.white; // Полная непрозрачность
+                        // Small preview in corner
+                        rectTransform.anchorMin = new Vector2(0.7f, 0.05f);
+                        rectTransform.anchorMax = new Vector2(0.95f, 0.25f);
+                        rectTransform.offsetMin = Vector2.zero;
+                        rectTransform.offsetMax = Vector2.zero;
 
-                        // Возвращаем нормальную видимость маркеров стен
-                        UpdateWallMarkersVisibility(false);
-
-                        ShowMessage("Режим предпросмотра камеры", 1.5f);
+                        // Semi-transparent
+                        cameraPreview.color = new Color(1, 1, 1, 0.8f);
                   }
             }
 
-            // Метод для обновления видимости маркеров стен в зависимости от режима камеры
-            private void UpdateWallMarkersVisibility(bool fullscreenMode)
-            {
-                  if (wallMarkers == null || wallMarkers.Count == 0)
-                        return;
-
-                  foreach (GameObject marker in wallMarkers)
-                  {
-                        if (marker == null) continue;
-
-                        // Получаем все рендереры в маркере
-                        Renderer[] renderers = marker.GetComponentsInChildren<Renderer>();
-
-                        foreach (Renderer renderer in renderers)
-                        {
-                              if (renderer == null || renderer.material == null) continue;
-
-                              // В полноэкранном режиме делаем маркеры ярче
-                              if (fullscreenMode)
-                              {
-                                    // Увеличиваем яркость и насыщенность материалов
-                                    Color currentColor = renderer.material.color;
-                                    renderer.material.color = new Color(
-                                        Mathf.Min(currentColor.r * 1.5f, 1f),
-                                        Mathf.Min(currentColor.g * 1.5f, 1f),
-                                        Mathf.Min(currentColor.b * 1.5f, 1f),
-                                        currentColor.a
-                                    );
-                              }
-                              else
-                              {
-                                    // Возвращаем нормальную яркость
-                                    Color currentColor = renderer.material.color;
-                                    if (currentColor.r > 0.7f || currentColor.g > 0.7f || currentColor.b > 0.7f)
-                                    {
-                                          renderer.material.color = new Color(
-                                              currentColor.r / 1.5f,
-                                              currentColor.g / 1.5f,
-                                              currentColor.b / 1.5f,
-                                              currentColor.a
-                                          );
-                                    }
-                              }
-                        }
-
-                        // Улучшаем видимость текстовых меток
-                        TextMesh[] textMeshes = marker.GetComponentsInChildren<TextMesh>();
-                        foreach (TextMesh textMesh in textMeshes)
-                        {
-                              if (textMesh == null) continue;
-
-                              if (fullscreenMode)
-                              {
-                                    // Делаем текст ярче и крупнее в полноэкранном режиме
-                                    textMesh.color = Color.white;
-                                    textMesh.characterSize = 0.15f;
-                              }
-                              else
-                              {
-                                    // Возвращаем обычный вид в режиме предпросмотра
-                                    textMesh.color = new Color(0.9f, 0.9f, 0.0f);
-                                    textMesh.characterSize = 0.1f;
-                              }
-                        }
-                  }
-            }
-
-            // Метод для переключения режима отображения камеры
+            // Method to toggle camera view mode
             private void ToggleCameraViewMode()
             {
-                  // Переключаем режим отображения камеры
-                  bool newMode = !isFullScreenCamera;
-                  SetCameraViewMode(newMode);
+                  SetCameraViewMode(!isFullScreenCamera);
             }
 
-            private void PaintOnWall(GameObject wall, Vector2 position, Color color)
+            // Method to toggle between camera modes
+            private void ToggleCamera()
             {
-                  // Получаем или создаем материал для рисования
-                  MeshRenderer renderer = wall.GetComponent<MeshRenderer>();
-                  if (renderer == null) return;
-
-                  // Проверяем, есть ли у стены текстура
-                  Texture2D paintTexture = renderer.material.mainTexture as Texture2D;
-
-                  // Если текстуры нет, создаем новую
-                  if (paintTexture == null)
-                  {
-                        paintTexture = new Texture2D(512, 512, TextureFormat.RGBA32, false);
-                        // Заполняем текстуру прозрачным белым цветом
-                        Color[] colors = new Color[512 * 512];
-                        for (int i = 0; i < colors.Length; i++)
-                        {
-                              colors[i] = new Color(1f, 1f, 1f, 0.1f);
-                        }
-                        paintTexture.SetPixels(colors);
-                        paintTexture.Apply();
-
-                        // Устанавливаем текстуру материалу
-                        renderer.material.mainTexture = paintTexture;
-                  }
-
-                  // Конвертируем позицию из текстурных координат в пиксели
-                  int x = Mathf.FloorToInt(position.x * paintTexture.width);
-                  int y = Mathf.FloorToInt(position.y * paintTexture.height);
-
-                  // Рисуем кружок
-                  int brushSize = 10;
-                  for (int i = -brushSize; i <= brushSize; i++)
-                  {
-                        for (int j = -brushSize; j <= brushSize; j++)
-                        {
-                              int pixelX = x + i;
-                              int pixelY = y + j;
-
-                              // Проверяем, находится ли пиксель в пределах текстуры
-                              if (pixelX >= 0 && pixelX < paintTexture.width && pixelY >= 0 && pixelY < paintTexture.height)
-                              {
-                                    // Проверяем, что пиксель внутри круга кисти
-                                    if (i * i + j * j <= brushSize * brushSize)
-                                    {
-                                          paintTexture.SetPixel(pixelX, pixelY, color);
-                                    }
-                              }
-                        }
-                  }
-
-                  // Применяем изменения
-                  paintTexture.Apply();
+                  // Toggle between the AR camera and webcam views
+                  ToggleCameraViewMode();
             }
 
-            // Простой компонент для управления камерой в тестовой сцене
-            public class SimpleCameraController : MonoBehaviour
+            // Add the overloaded method used in code
+            private IEnumerator ShowPaintPreview(GameObject wall, Color color, float duration)
             {
-                  private float moveSpeed = 2.0f;
-                  private float rotateSpeed = 120.0f;
-                  private bool showInfo = true;
-                  private float lastInfoTime = 0;
-
-                  void Start()
+                  // Find a position on the wall to preview the paint
+                  Renderer renderer = wall.GetComponent<Renderer>();
+                  if (renderer != null)
                   {
-                        // Показываем инструкцию при старте
-                        ShowControlsInfo();
+                        // Use the center of the object for preview
+                        Vector3 position = renderer.bounds.center;
+                        Vector3 normal = wall.transform.forward;
+
+                        // Show paint preview effect
+                        CreatePaintEffectAtHitPoint(position, normal, color);
+
+                        // Wait for duration
+                        yield return new WaitForSeconds(duration);
+                  }
+                  else
+                  {
+                        yield return null;
+                  }
+            }
+
+            // Add overload without parameters
+            private void UpdateColorSelection()
+            {
+                  if (colorPaletteContainer == null)
+                  {
+                        Debug.LogWarning("Color palette container is null in UpdateColorSelection - cannot update selection");
+                        return;
                   }
 
-                  void Update()
+                  // Make sure we have a valid color
+                  if (currentPaintColor == Color.clear && duluxColors != null && duluxColors.Count > 0)
                   {
-                        // Обработка перемещения
-                        float horizontal = 0;
-                        float vertical = 0;
-
-                        if (Input.GetKey(KeyCode.W)) vertical += 1;
-                        if (Input.GetKey(KeyCode.S)) vertical -= 1;
-                        if (Input.GetKey(KeyCode.A)) horizontal -= 1;
-                        if (Input.GetKey(KeyCode.D)) horizontal += 1;
-
-                        float actualMoveSpeed = moveSpeed;
-                        if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
-                        {
-                              actualMoveSpeed *= 2.0f; // Ускорение при Shift
-                        }
-
-                        // Перемещаем камеру
-                        Vector3 movement = new Vector3(horizontal, 0, vertical) * actualMoveSpeed * Time.deltaTime;
-                        transform.Translate(movement);
-
-                        // Вертикальное перемещение с Q и E
-                        if (Input.GetKey(KeyCode.Q)) transform.Translate(Vector3.up * actualMoveSpeed * Time.deltaTime);
-                        if (Input.GetKey(KeyCode.E)) transform.Translate(Vector3.down * actualMoveSpeed * Time.deltaTime);
-
-                        // Обработка вращения
-                        float rotateHorizontal = 0;
-                        float rotateVertical = 0;
-
-                        if (Input.GetKey(KeyCode.LeftArrow)) rotateHorizontal -= 1;
-                        if (Input.GetKey(KeyCode.RightArrow)) rotateHorizontal += 1;
-                        if (Input.GetKey(KeyCode.UpArrow)) rotateVertical += 1;
-                        if (Input.GetKey(KeyCode.DownArrow)) rotateVertical -= 1;
-
-                        // Поворачиваем камеру
-                        transform.Rotate(Vector3.up, rotateHorizontal * rotateSpeed * Time.deltaTime);
-                        transform.Rotate(Vector3.right, rotateVertical * rotateSpeed * Time.deltaTime);
-
-                        // Сброс положения по нажатию R
-                        if (Input.GetKeyDown(KeyCode.R))
-                        {
-                              transform.position = new Vector3(0, 1.7f, 0);
-                              transform.rotation = Quaternion.Euler(0, 0, 0);
-                              Debug.Log("Положение камеры сброшено к началу координат");
-                        }
-
-                        // Периодически показываем управление
-                        if (Time.time - lastInfoTime > 30 && showInfo)
-                        {
-                              ShowControlsInfo();
-                              lastInfoTime = Time.time;
-                        }
+                        currentPaintColor = duluxColors[0];
                   }
 
-                  private void ShowControlsInfo()
+                  UpdateColorSelection(currentPaintColor);
+            }
+
+            // Add the missing CreateBrushSizeButtons method
+            private void CreateBrushSizeButtons()
+            {
+                  if (brushSizeContainer == null)
                   {
-                        // Отображаем инструкцию в верхнем левом углу
-                        GameObject infoObj = new GameObject("ControlsInfo");
-                        infoObj.transform.SetParent(transform);
+                        Debug.LogWarning("Контейнер для кнопок размера кисти не назначен");
+                        return;
+                  }
 
-                        // Создаем Canvas
-                        Canvas canvas = infoObj.AddComponent<Canvas>();
-                        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                        infoObj.AddComponent<CanvasScaler>();
-                        infoObj.AddComponent<GraphicRaycaster>();
+                  // Clear any existing buttons
+                  foreach (Transform child in brushSizeContainer.transform)
+                  {
+                        Destroy(child.gameObject);
+                  }
 
-                        // Создаем панель с инструкцией
-                        GameObject panel = new GameObject("InfoPanel");
-                        panel.transform.SetParent(canvas.transform, false);
+                  // Create buttons for different brush sizes
+                  float[] sizes = { 5f, 10f, 15f, 20f, 30f };
 
-                        // Добавляем фон
-                        Image bgImage = panel.AddComponent<Image>();
-                        bgImage.color = new Color(0, 0, 0, 0.7f);
+                  for (int i = 0; i < sizes.Length; i++)
+                  {
+                        float size = sizes[i];
+                        GameObject buttonObj = new GameObject($"BrushSize_{size}");
+                        buttonObj.transform.SetParent(brushSizeContainer.transform, false);
 
-                        // Настраиваем размер и позицию
-                        RectTransform panelRect = bgImage.rectTransform;
-                        panelRect.anchorMin = new Vector2(0, 0.85f);
-                        panelRect.anchorMax = new Vector2(0.3f, 1);
-                        panelRect.offsetMin = Vector2.zero;
-                        panelRect.offsetMax = Vector2.zero;
+                        RectTransform rectTransform = buttonObj.AddComponent<RectTransform>();
+                        rectTransform.sizeDelta = new Vector2(40, 40);
 
-                        // Создаем текст инструкции
-                        GameObject textObj = new GameObject("InfoText");
-                        textObj.transform.SetParent(panel.transform, false);
+                        // Add button component
+                        Button button = buttonObj.AddComponent<Button>();
 
-                        Text infoText = textObj.AddComponent<Text>();
-                        infoText.text =
-                              "УПРАВЛЕНИЕ КАМЕРОЙ:\n" +
-                              "WASD - перемещение\n" +
-                              "Q/E - вверх/вниз\n" +
-                              "Стрелки - поворот\n" +
-                              "Shift - ускорение\n" +
-                              "R - сброс позиции";
+                        // Set button color based on size
+                        ColorBlock colors = button.colors;
+                        colors.normalColor = Color.white;
+                        button.colors = colors;
 
-                        infoText.color = Color.white;
-                        infoText.fontSize = 16;
-                        infoText.fontStyle = FontStyle.Bold;
+                        // Add image component for button background
+                        Image image = buttonObj.AddComponent<Image>();
+                        image.sprite = CreateCircleSprite(30, Color.white, true);
 
-                        // Настраиваем размер и позицию текста
-                        RectTransform textRect = infoText.rectTransform;
+                        // Add text to show size
+                        GameObject textObj = new GameObject("Text");
+                        textObj.transform.SetParent(buttonObj.transform, false);
+
+                        Text text = textObj.AddComponent<Text>();
+                        text.text = size.ToString();
+                        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                        text.alignment = TextAnchor.MiddleCenter;
+                        text.color = Color.black;
+
+                        RectTransform textRect = textObj.GetComponent<RectTransform>();
                         textRect.anchorMin = Vector2.zero;
                         textRect.anchorMax = Vector2.one;
-                        textRect.offsetMin = new Vector2(10, 5);
-                        textRect.offsetMax = new Vector2(-10, -5);
+                        textRect.offsetMin = Vector2.zero;
+                        textRect.offsetMax = Vector2.zero;
 
-                        // Автоматическое уничтожение через 10 секунд
-                        Destroy(infoObj, 10f);
+                        // Add click event
+                        float brushSizeValue = size / 1000f; // Convert to appropriate scale
+                        button.onClick.AddListener(() =>
+                        {
+                              brushSize = brushSizeValue;
+                              Debug.Log($"Размер кисти установлен: {size}px");
+                        });
                   }
             }
       }
