@@ -44,7 +44,7 @@ namespace Remalux.WallPainting.Core
             private void DisableOrangeUIElements()
             {
                   // Find all Image components
-                  Image[] images = FindObjectsOfType<Image>();
+                  Image[] images = FindObjectsByType<Image>(FindObjectsSortMode.None);
                   foreach (Image img in images)
                   {
                         // Check if the color is orange (r ~= 1, g ~= 0.5, b ~= 0)

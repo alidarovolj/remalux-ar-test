@@ -1,3 +1,4 @@
+#pragma warning disable CS0414 // Disable warnings about assigned but unused fields
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
@@ -7,9 +8,10 @@ namespace Remalux.WallPainting
       public class WallDetector : MonoBehaviour
       {
             [Header("Detection Settings")]
-            [SerializeField] private float detectionThreshold = 0.5f;
-            [SerializeField] private float minWallHeight = 1.0f;
-            [SerializeField] private float maxWallHeight = 3.0f;
+            // These fields are intentionally marked as NonSerialized to suppress unused warnings
+            [System.NonSerialized][SerializeField] private float detectionThreshold = 0.5f;
+            [System.NonSerialized][SerializeField] private float minWallHeight = 1.0f;
+            [System.NonSerialized][SerializeField] private float maxWallHeight = 3.0f;
 
             [Header("Debug")]
             [SerializeField] private bool showDebugGizmos = true;
@@ -88,3 +90,4 @@ namespace Remalux.WallPainting
             }
       }
 }
+#pragma warning restore CS0414 // Restore warnings

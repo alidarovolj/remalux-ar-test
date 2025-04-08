@@ -22,7 +22,7 @@ namespace Remalux.WallPainting
 
             private void CreateMainCanvas()
             {
-                  var existingCanvas = Object.FindObjectOfType<Canvas>();
+                  var existingCanvas = Object.FindFirstObjectByType<Canvas>();
                   if (existingCanvas != null)
                   {
                         mainCanvas = existingCanvas;

@@ -47,7 +47,7 @@ namespace Remalux.Room
 
                   if (textureManager == null)
                   {
-                        textureManager = FindObjectOfType<TextureManager>();
+                        textureManager = FindFirstObjectByType<TextureManager>();
                         if (textureManager == null)
                         {
                               Debug.LogError("RoomController: TextureManager not found!");

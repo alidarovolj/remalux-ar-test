@@ -29,7 +29,7 @@ namespace Remalux.WallPainting
 
             private void Start()
             {
-                  textureManager = FindObjectOfType<TextureManager>();
+                  textureManager = FindFirstObjectByType<TextureManager>();
                   if (textureManager == null)
                   {
                         Debug.LogError("TextureUI: TextureManager не найден!");

@@ -1,3 +1,4 @@
+#pragma warning disable CS0414 // Disable warnings about assigned but unused fields
 using UnityEngine;
 using System.Collections.Generic;
 using Remalux.WallPainting;
@@ -10,8 +11,9 @@ namespace Remalux.WallPainting
       public class WallMeshBuilder : MonoBehaviour
       {
             [Header("Wall Settings")]
-            [SerializeField] private float wallHeight = 2.5f;
-            [SerializeField] private float wallThickness = 0.1f;
+            // These fields are intentionally marked as NonSerialized to suppress unused warnings
+            [System.NonSerialized][SerializeField] private float wallHeight = 2.5f;
+            [System.NonSerialized][SerializeField] private float wallThickness = 0.1f;
             [SerializeField] private Material wallMaterial;
 
             [Header("References")]
@@ -23,7 +25,7 @@ namespace Remalux.WallPainting
             {
                   if (wallDetector == null)
                   {
-                        wallDetector = FindObjectOfType<WallDetector>();
+                        wallDetector = FindFirstObjectByType<WallDetector>();
                         if (wallDetector == null)
                         {
                               Debug.LogError("WallMeshBuilder: WallDetector not found!");
@@ -146,3 +148,4 @@ namespace Remalux.WallPainting
             }
       }
 }
+#pragma warning restore CS0414 // Restore warnings

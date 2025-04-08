@@ -1,3 +1,4 @@
+#pragma warning disable CS0414 // Disable warnings about assigned but unused fields
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
@@ -23,19 +24,20 @@ namespace Remalux.WallPainting.Vision
             [SerializeField] private int targetFPS = 30;
 
             [Header("Detection Settings")]
-            [SerializeField] private float detectionInterval = 0.03f; // Увеличиваем частоту обнаружения
-            [SerializeField] private float minWallHeight = 0.2f; // Дальнейшее снижение минимальной высоты
-            [SerializeField] private float minWallWidth = 0.2f; // Дальнейшее снижение минимальной ширины
+            // These fields are intentionally marked as NonSerialized to suppress unused warnings
+            [System.NonSerialized][SerializeField] private float detectionInterval = 0.03f; // Увеличиваем частоту обнаружения
+            [System.NonSerialized][SerializeField] private float minWallHeight = 0.2f; // Дальнейшее снижение минимальной высоты
+            [System.NonSerialized][SerializeField] private float minWallWidth = 0.2f; // Дальнейшее снижение минимальной ширины
             [SerializeField] private double cannyThreshold1 = 20; // Еще ниже порог для большей чувствительности
             [SerializeField] private double cannyThreshold2 = 80; // Еще ниже верхний порог
-            [SerializeField] private int houghThreshold = 20; // Еще ниже порог Hough
-            [SerializeField] private double minLineLength = 30; // Еще меньше минимальная длина линии
-            [SerializeField] private double maxLineGap = 30; // Увеличиваем разрыв между линиями
+            [System.NonSerialized][SerializeField] private int houghThreshold = 20; // Еще ниже порог Hough
+            [System.NonSerialized][SerializeField] private double minLineLength = 30; // Еще меньше минимальная длина линии
+            [System.NonSerialized][SerializeField] private double maxLineGap = 30; // Увеличиваем разрыв между линиями
 
             [Header("Performance")]
             [SerializeField] private bool useProcessingResolution = true;
             [SerializeField] private Vector2Int processingResolution = new Vector2Int(640, 480); // Повышаем разрешение обработки
-            [SerializeField] private bool showPerformanceStats = true;
+            [System.NonSerialized][SerializeField] private bool showPerformanceStats = true;
             [SerializeField] private float processingInterval = 0.05f; // Увеличиваем частоту обработки
             [SerializeField] private bool useGPUAcceleration = true; // Оставляем GPU ускорение
 
@@ -71,9 +73,10 @@ namespace Remalux.WallPainting.Vision
             private ComputeBuffer resultBuffer;
             private ComputeBuffer lineCountBuffer;
             private Color32[] webcamBuffer;
-            private bool isWebcamPlaying = false;
-            private bool didUpdateThisFrame = false;
-            private bool hasNewFrame = false;
+            // These fields are intentionally marked as NonSerialized to suppress unused warnings
+            [System.NonSerialized] private bool isWebcamPlaying = false;
+            [System.NonSerialized] private bool didUpdateThisFrame = false;
+            [System.NonSerialized] private bool hasNewFrame = false;
             private Mat frameMat;
             private bool supportsComputeShaders;
             private byte[] mainThreadTextureData;
@@ -116,7 +119,7 @@ namespace Remalux.WallPainting.Vision
                         if (mainCamera == null)
                         {
                               Debug.LogError("Не задана основная камера! Преобразование координат не будет работать.");
-                              mainCamera = FindObjectOfType<Camera>();
+                              mainCamera = FindFirstObjectByType<Camera>();
 
                               if (mainCamera != null)
                               {
@@ -1029,7 +1032,7 @@ namespace Remalux.WallPainting.Vision
 
                         if (mainCamera == null)
                         {
-                              mainCamera = FindObjectOfType<Camera>();
+                              mainCamera = FindFirstObjectByType<Camera>();
                               if (mainCamera == null)
                               {
                                     Debug.LogError("Не найдена камера! Невозможно создать стены.");
@@ -1148,3 +1151,4 @@ namespace Remalux.WallPainting.Vision
             public int id;
       }
 }
+#pragma warning restore CS0414 // Restore warnings

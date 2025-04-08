@@ -537,7 +537,7 @@ namespace Remalux.WallPainting.Vision
             }
 
             // Метод для включения отображения контуров на камере
-            private void EnableContoursOnCamera()
+            private void ConfigureContoursOnCamera()
             {
                   if (wallDetector == null)
                   {

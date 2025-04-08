@@ -47,7 +47,7 @@ namespace Remalux.AR
             private void InitializeVisualizer()
             {
                   // Находим WallPainter в сцене
-                  MonoBehaviour[] allComponents = FindObjectsOfType<MonoBehaviour>();
+                  MonoBehaviour[] allComponents = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
                   foreach (MonoBehaviour component in allComponents)
                   {
                         if (component.GetType().Name == "WallPainter")

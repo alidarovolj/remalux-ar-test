@@ -25,7 +25,7 @@ namespace Remalux.WallPainting
 
             private void Start()
             {
-                  roomManager = FindObjectOfType<RoomManager>();
+                  roomManager = FindFirstObjectByType<RoomManager>();
                   if (roomManager == null)
                   {
                         Debug.LogError("TextureManager: RoomManager не найден!");

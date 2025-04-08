@@ -12,7 +12,7 @@ namespace Remalux.AR
             private void Start()
             {
                   if (wallPainter == null)
-                        wallPainter = FindObjectOfType<WallPainter>();
+                        wallPainter = FindFirstObjectByType<WallPainter>();
 
                   if (mainCamera == null)
                         mainCamera = Camera.main;

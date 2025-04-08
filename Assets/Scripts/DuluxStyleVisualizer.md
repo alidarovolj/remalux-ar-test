@@ -37,6 +37,7 @@ This system implements a Dulux Visualizer-like wall painting visualization syste
 ## Technical Details
 
 The system uses:
+
 - Computer vision for wall detection
 - Material modification for realistic painting
 - Realistic texture blending to maintain surface details
@@ -45,4 +46,4 @@ The system uses:
 
 ## Implementation Notes
 
-This implementation keeps the existing wall detection and contour system intact while adding Dulux-style painting functionality. The painting mode overlays new textures on detected walls in a way that maintains lighting and texture details, similar to how the Dulux Visualizer app works. 
+This implementation keeps the existing wall detection and contour system intact while adding Dulux-style painting functionality. The painting mode overlays new textures on detected walls in a way that maintains lighting and texture details, similar to how the Dulux Visualizer app works.
