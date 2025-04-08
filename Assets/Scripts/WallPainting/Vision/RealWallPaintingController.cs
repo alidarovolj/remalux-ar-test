@@ -961,7 +961,7 @@ namespace Remalux.WallPainting.Vision
                         yield break;
                   }
 
-                  // Переменные, которые будут использоваться позже в корутине
+                  // Получаем все необходимые данные в начале корутины
                   Renderer renderer = null;
                   Bounds bounds = default;
                   Vector3 center = Vector3.zero;
@@ -970,9 +970,15 @@ namespace Remalux.WallPainting.Vision
                   float height = 1.0f;
                   Color materialColor = Color.blue;
 
-                  // Первый блок try только для получения данных
                   try
                   {
+                        // Проверяем, активен ли объект
+                        if (wall == null || !wall.activeInHierarchy)
+                        {
+                              Debug.LogWarning("CreateMultiplePaintEffects: Wall object is null or inactive");
+                              yield break;
+                        }
+
                         renderer = wall.GetComponent<Renderer>();
                         if (renderer == null)
                         {
@@ -980,7 +986,7 @@ namespace Remalux.WallPainting.Vision
                               yield break;
                         }
 
-                        // Сохраняем важные данные заранее
+                        // Сохраняем все необходимые данные в локальных переменных
                         bounds = renderer.bounds;
                         center = bounds.center;
                         forward = wall.transform.forward;
@@ -990,7 +996,7 @@ namespace Remalux.WallPainting.Vision
                   }
                   catch (System.Exception e)
                   {
-                        Debug.LogWarning($"CreateMultiplePaintEffects: Failed to get wall renderer: {e.Message}");
+                        Debug.LogWarning($"CreateMultiplePaintEffects: Failed to get wall data: {e.Message}");
                         yield break;
                   }
 
@@ -998,40 +1004,27 @@ namespace Remalux.WallPainting.Vision
                   int columns = 5;
                   int rows = 5;
 
+                  // Теперь используем только локальные переменные, без обращения к wall
                   for (int x = 0; x < columns; x++)
                   {
                         for (int y = 0; y < rows; y++)
                         {
-                              // Проверка на null вне блока try
-                              if (wall == null || !wall.activeInHierarchy)
-                              {
-                                    Debug.LogWarning("CreateMultiplePaintEffects: Wall was destroyed during animation");
-                                    yield break;
-                              }
-
-                              // Вычисляем позицию для эффекта
+                              // Вычисляем позицию для эффекта используя ранее полученные данные
                               float xPos = center.x - width / 2 + width * (x + 0.5f) / columns;
                               float yPos = center.y - height / 2 + height * (y + 0.5f) / rows;
                               Vector3 effectPosition = new Vector3(xPos, yPos, center.z);
 
-                              // Создаем эффект покраски в отдельном try-блоке
                               try
                               {
+                                    // Используем сохраненные данные вместо обращения к стене
                                     CreatePaintEffectAtHitPoint(effectPosition, forward, materialColor);
                               }
                               catch (System.Exception e)
                               {
-                                    // Только логируем ошибку, но продолжаем выполнение
                                     Debug.LogWarning($"CreateMultiplePaintEffects: Error creating effect at position {effectPosition}: {e.Message}");
-
-                                    // Если это ошибка с отсутствующей ссылкой, прекращаем всю корутину
-                                    if (e is MissingReferenceException)
-                                    {
-                                          yield break;
-                                    }
                               }
 
-                              // yield находится вне блока try-catch
+                              // Небольшая задержка между созданием эффектов
                               yield return new WaitForSeconds(0.01f);
                         }
                   }
@@ -1754,12 +1747,6 @@ namespace Remalux.WallPainting.Vision
                         GameObject container = new GameObject("ColorButtonsContainer");
                         container.transform.SetParent(colorPalettePanel.transform, false);
 
-                        // Сохраняем ссылку на контейнер
-                        if (colorPaletteContainer == null)
-                        {
-                              colorPaletteContainer = container.transform;
-                        }
-
                         // Добавляем компоненты для контейнера
                         RectTransform containerRect = container.AddComponent<RectTransform>();
                         containerRect.anchorMin = new Vector2(0.0f, 0.0f);
@@ -1776,17 +1763,26 @@ namespace Remalux.WallPainting.Vision
                         layout.childControlWidth = false;
                         layout.childControlHeight = false;
 
-                        // Добавляем кнопки цветов
-                        CreateColorButtons();
+                        // Устанавливаем ссылку на контейнер
+                        colorPaletteContainer = container.transform;
+
+                        // Проверяем, что контейнер создан успешно
+                        if (colorPaletteContainer != null)
+                        {
+                              CreateColorButtons();
+                              Debug.Log("Цветовая палитра и кнопки созданы успешно");
+                        }
+                        else
+                        {
+                              Debug.LogError("Не удалось создать colorPaletteContainer");
+                        }
 
                         // Скрываем панель цветов, если не в режиме покраски
                         colorPalettePanel.SetActive(isPaintingMode);
-
-                        Debug.Log("Цветовая палитра создана успешно");
                   }
                   catch (System.Exception e)
                   {
-                        Debug.LogError($"Не удалось создать контейнер для кнопок цветов! {e.Message}");
+                        Debug.LogError($"Ошибка при создании цветовой палитры: {e.Message}");
                         // Если не удалось создать палитру, используем дефолтный цвет
                         currentPaintColor = Color.white;
                   }
@@ -1801,39 +1797,46 @@ namespace Remalux.WallPainting.Vision
                         return;
                   }
 
-                  // Очищаем контейнер от старых кнопок
-                  foreach (Transform child in colorPaletteContainer)
+                  try
                   {
-                        Destroy(child.gameObject);
-                  }
-
-                  // Если список цветов пуст, добавляем несколько стандартных цветов
-                  if (duluxColors == null || duluxColors.Count == 0)
-                  {
-                        duluxColors = new List<Color>
+                        // Очищаем контейнер от старых кнопок
+                        foreach (Transform child in colorPaletteContainer)
                         {
-                              Color.white,
-                              Color.gray,
-                              Color.black,
-                              Color.red,
-                              Color.green,
-                              Color.blue,
-                              Color.yellow,
-                              new Color(1, 0.5f, 0) // Оранжевый
-                        };
-                  }
+                              Destroy(child.gameObject);
+                        }
 
-                  // Создаем кнопку для каждого цвета
-                  foreach (Color color in duluxColors)
-                  {
-                        CreateColorButton(color);
-                  }
+                        // Если список цветов пуст, добавляем несколько стандартных цветов
+                        if (duluxColors == null || duluxColors.Count == 0)
+                        {
+                              duluxColors = new List<Color>
+                              {
+                                    Color.white,
+                                    Color.gray,
+                                    Color.black,
+                                    Color.red,
+                                    Color.green,
+                                    Color.blue,
+                                    Color.yellow,
+                                    new Color(1, 0.5f, 0) // Оранжевый
+                              };
+                        }
 
-                  // Выбираем первый цвет по умолчанию
-                  if (duluxColors.Count > 0)
+                        // Создаем кнопку для каждого цвета
+                        foreach (Color color in duluxColors)
+                        {
+                              CreateColorButton(color);
+                        }
+
+                        // Выбираем первый цвет по умолчанию
+                        if (duluxColors.Count > 0)
+                        {
+                              currentPaintColor = duluxColors[0];
+                              UpdateColorSelection(duluxColors[0]);
+                        }
+                  }
+                  catch (System.Exception e)
                   {
-                        currentPaintColor = duluxColors[0];
-                        UpdateColorSelection(duluxColors[0]);
+                        Debug.LogError($"Ошибка при создании кнопок цветов: {e.Message}");
                   }
             }
 
