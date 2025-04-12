@@ -135,7 +135,7 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.ARStarterAssets
         {
             if (m_ObjectSpawner == null)
 #if UNITY_2023_1_OR_NEWER
-                m_ObjectSpawner = FindAnyObjectByType<ObjectSpawner>();
+                m_ObjectSpawner = UnityEngine.Object.FindFirstObjectByType<ObjectSpawner>();
 #else
                 m_ObjectSpawner = FindObjectOfType<ObjectSpawner>();
 #endif

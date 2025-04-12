@@ -23,7 +23,7 @@ namespace Remalux.AR.Utilities
         /// </summary>
         public static T FindAnyObject<T>() where T : Object
         {
-            return Object.FindAnyObjectByType<T>();
+            return Object.FindFirstObjectByType<T>();
         }
 
         /// <summary>
@@ -62,4 +62,4 @@ namespace Remalux.AR.Utilities
             return Object.FindObjectsByType<T>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         }
     }
-} 
+}

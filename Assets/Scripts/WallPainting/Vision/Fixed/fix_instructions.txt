@@ -1,3 +1,0 @@
-Инструкции по исправлению ошибок в файле RealWallPaintingController.cs:
-1. Удалить дублирующийся метод CreateCircleSprite на строках 3029-3078
-2. На строке 3077 заменить new Rect(0, 0, resolution, resolution) на new UnityEngine.Rect(0, 0, resolution, resolution)

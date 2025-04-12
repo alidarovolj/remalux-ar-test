@@ -511,34 +511,21 @@ public class ARTemplateMenuManager : MonoBehaviour
         {
             foreach (var plane in eventArgs.added)
             {
-                if (plane.TryGetComponent<ARFeatheredPlaneMeshVisualizerCompanion>(out var visualizer))
+                if (plane != null)
                 {
+                    var visualizer = plane.gameObject.AddComponent<ARFeatheredPlaneMeshVisualizerCompanion>();
                     featheredPlaneMeshVisualizerCompanions.Add(visualizer);
-                    visualizer.visualizeSurfaces = (m_DebugPlaneSlider.value != 0);
                 }
             }
         }
 
         if (eventArgs.removed.Count > 0)
         {
-            foreach (var plane in eventArgs.removed)
+            foreach (var kvp in eventArgs.removed)
             {
-                if (plane.Value != null && plane.Value.TryGetComponent<ARFeatheredPlaneMeshVisualizerCompanion>(out var visualizer))
+                ARPlane plane = kvp.Value;
+                if (plane != null && plane.TryGetComponent<ARFeatheredPlaneMeshVisualizerCompanion>(out var visualizer))
                     featheredPlaneMeshVisualizerCompanions.Remove(visualizer);
-            }
-        }
-
-        // Fallback if the counts do not match after an update
-        if (m_PlaneManager.trackables.count != featheredPlaneMeshVisualizerCompanions.Count)
-        {
-            featheredPlaneMeshVisualizerCompanions.Clear();
-            foreach (var trackable in m_PlaneManager.trackables)
-            {
-                if (trackable.TryGetComponent<ARFeatheredPlaneMeshVisualizerCompanion>(out var visualizer))
-                {
-                    featheredPlaneMeshVisualizerCompanions.Add(visualizer);
-                    visualizer.visualizeSurfaces = (m_DebugPlaneSlider.value != 0);
-                }
             }
         }
     }
