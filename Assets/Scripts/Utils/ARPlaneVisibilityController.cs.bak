@@ -1,0 +1,2677 @@
+using UnityEngine;
+using UnityEngine.XR.ARFoundation;
+using UnityEngine.XR.ARSubsystems;
+using System.Collections.Generic;
+using System.Collections;
+using System.Linq;
+using Unity.XR.CoreUtils;
+using Remalux.AR.Utilities;
+
+namespace Remalux.AR
+{
+      /// <summary>
+      /// Контроллер видимости AR плоскостей
+      /// </summary>
+      public class ARPlaneVisibilityController : MonoBehaviour
+      {
+            [Header("AR компоненты")]
+            [SerializeField] public ARPlaneManager planeManager;
+            [SerializeField] private ARRaycastManager raycastManager;
+
+            [Header("Внешний вид")]
+            [SerializeField] public Material wallMaterial;
+            [SerializeField] public Material floorMaterial;
+            [SerializeField] private float planeAlpha = 0.5f;
+
+            [Header("Настройки")]
+            [SerializeField] private bool autoActivatePlanes = true;
+            [SerializeField] private bool highlightVerticalPlanes = true;
+            // Marked with [System.NonSerialized] to indicate it's intentionally not used directly
+            [System.NonSerialized]
+            [SerializeField] private bool hideOnStart = false;
+
+            // Делегат и событие для обнаружения стен
+            public delegate void WallDetectedHandler(ARPlane wall);
+            public delegate void WallReadyHandler(GameObject wall);
+            // Marked these events with [System.Diagnostics.CodeAnalysis.SuppressMessage] to indicate they are designed for external use
+            [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE0067:Unused event", Justification = "Used by external components")]
+            public event WallDetectedHandler onWallDetected;
+            [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE0067:Unused event", Justification = "Used by external components")]
+            public event WallReadyHandler onWallReady;
+
+            private Dictionary<TrackableId, Material> originalMaterials = new Dictionary<TrackableId, Material>();
+            private List<ARPlane> verticalPlanes = new List<ARPlane>();
+            private List<ARPlane> horizontalPlanes = new List<ARPlane>();
+            private Dictionary<TrackableId, GameObject> planeVisualizations = new Dictionary<TrackableId, GameObject>();
+
+            private Transform _demoSurfacesParent;
+
+            private Material _cachedWallMaterial;
+            private Material _cachedFloorMaterial;
+
+            private void Awake()
+            {
+                  if (planeManager == null)
+                  {
+                        planeManager = GetComponent<ARPlaneManager>();
+                        if (planeManager == null)
+                        {
+                              planeManager = FindFirstObjectByType<ARPlaneManager>();
+                        }
+                  }
+
+                  // Настраиваем ARPlaneManager
+                  if (!planeManager.enabled)
+                  {
+                        Debug.LogWarning("ARPlaneManager отключен! Включаем...");
+                        planeManager.enabled = true;
+                  }
+
+                  // Убеждаемся, что настройки плоскостей корректны
+                  planeManager.requestedDetectionMode = PlaneDetectionMode.Vertical | PlaneDetectionMode.Horizontal;
+
+                  // Проверяем настройки обнаружения плоскостей
+                  if (!planeManager.planePrefab)
+                  {
+                        Debug.LogWarning("ARPlaneManager не имеет установленного префаба плоскости!");
+
+                        // Создаем простой префаб плоскости, если он не задан
+                        GameObject planePrefab = new GameObject("AR Plane Prefab");
+                        planePrefab.AddComponent<MeshFilter>();
+                        MeshRenderer renderer = planePrefab.AddComponent<MeshRenderer>();
+
+                        // Устанавливаем материал
+                        Material defaultMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                        defaultMaterial.color = new Color(0.5f, 0.5f, 0.5f, planeAlpha);
+                        renderer.material = defaultMaterial;
+
+                        // Устанавливаем префаб
+                        planeManager.planePrefab = planePrefab;
+                        Debug.Log("Создан стандартный префаб для ARPlaneManager");
+                  }
+                  else
+                  {
+                        Debug.Log($"ARPlaneManager использует префаб: {planeManager.planePrefab.name}");
+
+                        // Проверяем наличие MeshRenderer в префабе
+                        MeshRenderer prefabRenderer = planeManager.planePrefab.GetComponent<MeshRenderer>();
+                        if (prefabRenderer == null)
+                        {
+                              Debug.LogWarning("Префаб плоскости ARPlaneManager не имеет компонента MeshRenderer!");
+                              prefabRenderer = planeManager.planePrefab.AddComponent<MeshRenderer>();
+
+                              // Добавляем MeshFilter, если его нет
+                              if (!planeManager.planePrefab.GetComponent<MeshFilter>())
+                              {
+                                    planeManager.planePrefab.AddComponent<MeshFilter>();
+                              }
+
+                              // Устанавливаем материал
+                              Material defaultMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                              defaultMaterial.color = new Color(0.5f, 0.5f, 0.5f, planeAlpha);
+                              prefabRenderer.material = defaultMaterial;
+
+                              Debug.Log("Добавлены компоненты к префабу плоскости");
+                        }
+
+                        // Убеждаемся, что рендерер плоскости включен
+                        prefabRenderer.enabled = true;
+                  }
+
+                  // Инициализация кэшированных материалов
+                  InitializeCachedMaterials();
+            }
+
+            private void InitializeCachedMaterials()
+            {
+                  // Создаем материалы по умолчанию, если они не заданы
+                  if (wallMaterial == null)
+                  {
+                        _cachedWallMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                        _cachedWallMaterial.color = new Color(1.0f, 0.2f, 0.2f, 0.7f);
+                  }
+                  else
+                  {
+                        _cachedWallMaterial = new Material(wallMaterial);
+                  }
+
+                  if (floorMaterial == null)
+                  {
+                        _cachedFloorMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                        _cachedFloorMaterial.color = new Color(0.2f, 1.0f, 0.2f, 0.7f);
+                  }
+                  else
+                  {
+                        _cachedFloorMaterial = new Material(floorMaterial);
+                  }
+            }
+
+            private void OnEnable()
+            {
+                  if (planeManager != null)
+                  {
+                        planeManager.trackablesChanged.AddListener(OnPlanesChanged);
+                  }
+                  else
+                  {
+                        Debug.LogWarning("ARPlaneManager is null in OnEnable");
+                  }
+            }
+
+            private void OnDisable()
+            {
+                  if (planeManager != null)
+                  {
+                        planeManager.trackablesChanged.RemoveListener(OnPlanesChanged);
+                  }
+            }
+
+            /// <summary>
+            /// Обработчик события изменения плоскостей
+            /// </summary>
+            private void OnPlanesChanged(ARTrackablesChangedEventArgs<ARPlane> eventArgs)
+            {
+                  if (!autoActivatePlanes)
+                  {
+                        Debug.Log("Plane visibility disabled. Ignoring plane changes.");
+                        return;
+                  }
+
+                  // Ограничиваем объем работы для большого количества плоскостей
+                  bool hasSignificantChanges = false;
+                  int processedCount = 0;
+                  int maxProcessedPerFrame = 10; // Максимальное число плоскостей для обработки за один кадр
+
+                  // Обработка добавленных плоскостей
+                  if (eventArgs.added != null && eventArgs.added.Count > 0)
+                  {
+                        Debug.Log($"Added {eventArgs.added.Count} planes");
+                        hasSignificantChanges = true;
+
+                        foreach (ARPlane plane in eventArgs.added)
+                        {
+                              if (plane == null) continue;
+
+                              processedCount++;
+                              if (processedCount > maxProcessedPerFrame) break;
+
+                              CreateCustomPlaneVisualization(plane);
+                              EnsureMeshCollider(plane);
+
+                              // Если это стена, добавляем в список стен
+                              if (IsVerticalPlane(plane))
+                              {
+                                    verticalPlanes.Add(plane);
+                                    Debug.Log($"Vertical plane added: {plane.trackableId}");
+                              }
+                              else
+                              {
+                                    horizontalPlanes.Add(plane);
+                                    Debug.Log($"Horizontal plane added: {plane.trackableId}");
+                              }
+                        }
+                  }
+
+                  // Обработка обновленных плоскостей
+                  if (eventArgs.updated != null && eventArgs.updated.Count > 0)
+                  {
+                        foreach (ARPlane plane in eventArgs.updated)
+                        {
+                              if (plane == null) continue;
+
+                              processedCount++;
+                              if (processedCount > maxProcessedPerFrame) break;
+
+                              // Обновляем визуализацию
+                              UpdatePlaneVisualization(plane);
+                              EnsureMeshCollider(plane);
+                        }
+                  }
+
+                  // Обработка удаленных плоскостей
+                  if (eventArgs.removed != null && eventArgs.removed.Count > 0)
+                  {
+                        foreach (KeyValuePair<TrackableId, ARPlane> kvp in eventArgs.removed)
+                        {
+                              ARPlane plane = kvp.Value;
+                              if (plane == null) continue;
+
+                              processedCount++;
+                              if (processedCount > maxProcessedPerFrame) break;
+
+                              // Если это стена, удаляем из списка стен
+                              if (IsVerticalPlane(plane))
+                              {
+                                    verticalPlanes.Remove(plane);
+                                    Debug.Log($"Vertical plane removed: {plane.trackableId}");
+                              }
+                              else
+                              {
+                                    horizontalPlanes.Remove(plane);
+                                    Debug.Log($"Horizontal plane removed: {plane.trackableId}");
+                              }
+
+                              // Удаляем визуализацию
+                              RemovePlaneVisualization(plane);
+                        }
+                  }
+
+                  // Если были значимые изменения, обновляем все визуализации
+                  if (hasSignificantChanges)
+                  {
+                        UpdateAllVisualizations();
+                  }
+            }
+
+            /// <summary>
+            /// Обновляет видимость AR плоскости
+            /// </summary>
+            public void UpdatePlaneVisibility(ARPlane plane)
+            {
+                  if (plane == null) return;
+
+                  // Проверяем, что плоскость активна
+                  if (!plane.gameObject.activeInHierarchy)
+                  {
+                        Debug.Log($"Плоскость {plane.trackableId} не активна в иерархии - пытаемся активировать");
+                        try
+                        {
+                              // Пытаемся активировать плоскость
+                              plane.gameObject.SetActive(true);
+
+                              // Делаем отложенную вторую попытку через корутину
+                              StartCoroutine(DelayedActivationCheck(plane));
+                        }
+                        catch (System.Exception e)
+                        {
+                              Debug.LogError($"Ошибка при активации плоскости {plane.trackableId}: {e.Message}");
+                              return;
+                        }
+                  }
+
+                  // Получаем компонент рендерера
+                  MeshRenderer renderer = plane.GetComponent<MeshRenderer>();
+                  if (renderer == null)
+                  {
+                        Debug.Log($"MeshRenderer на плоскости {plane.trackableId} не найден - добавляем");
+
+                        // Пробуем добавить рендерер, если его нет
+                        renderer = plane.gameObject.AddComponent<MeshRenderer>();
+                        MeshFilter meshFilter = plane.GetComponent<MeshFilter>();
+                        if (meshFilter == null)
+                        {
+                              meshFilter = plane.gameObject.AddComponent<MeshFilter>();
+                              Debug.Log($"Добавлен MeshFilter на плоскость {plane.trackableId}");
+                        }
+                  }
+
+                  // Убеждаемся, что рендерер включен
+                  if (!renderer.enabled)
+                  {
+                        renderer.enabled = true;
+                        Debug.Log($"Включен рендерер на плоскости {plane.trackableId}");
+                  }
+
+                  // Сохраняем оригинальный материал, если еще не сохранен
+                  if (!originalMaterials.ContainsKey(plane.trackableId))
+                  {
+                        originalMaterials[plane.trackableId] = renderer.material;
+                  }
+
+                  // Настраиваем видимость и материал
+                  if (autoActivatePlanes)
+                  {
+                        // Делаем плоскость видимой
+                        renderer.enabled = true;
+
+                        // Определяем тип плоскости (стена или пол)
+                        bool isWall = IsVerticalPlane(plane);
+
+                        // Применяем соответствующий материал
+                        if (isWall && highlightVerticalPlanes)
+                        {
+                              // Инициализируем кэшированные материалы, если они еще не созданы
+                              if (_cachedWallMaterial == null)
+                              {
+                                    InitializeCachedMaterials();
+                              }
+
+                              // Используем кэшированный материал для стен
+                              renderer.material = _cachedWallMaterial;
+
+                              // Установка рендеринга в режиме прозрачности
+                              renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                              renderer.receiveShadows = false;
+
+                              // Добавляем MeshCollider для взаимодействия со стеной
+                              EnsureMeshCollider(plane.gameObject);
+                        }
+                        else
+                        {
+                              // Инициализируем кэшированные материалы, если они еще не созданы
+                              if (_cachedFloorMaterial == null)
+                              {
+                                    InitializeCachedMaterials();
+                              }
+
+                              // Используем кэшированный материал для пола
+                              renderer.material = _cachedFloorMaterial;
+
+                              // Установка рендеринга в режиме прозрачности
+                              renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                              renderer.receiveShadows = false;
+                        }
+                  }
+                  else
+                  {
+                        // Если видимость отключена, просто выключаем рендерер
+                        renderer.enabled = false;
+                  }
+            }
+
+            /// <summary>
+            /// Обновляет визуализацию AR плоскости
+            /// </summary>
+            private void UpdatePlaneVisualization(ARPlane plane)
+            {
+                  if (plane == null) return;
+
+                  // Проверяем, есть ли кастомная визуализация
+                  if (planeVisualizations.ContainsKey(plane.trackableId) && planeVisualizations[plane.trackableId] != null)
+                  {
+                        // Используем существующий метод для обновления кастомной визуализации
+                        UpdateCustomPlaneVisualization(plane);
+                  }
+                  else
+                  {
+                        // Если кастомной визуализации нет, обновляем стандартную видимость
+                        UpdatePlaneVisibility(plane);
+
+                        // И создаем кастомную визуализацию при необходимости
+                        if (autoActivatePlanes)
+                        {
+                              CreateCustomPlaneVisualization(plane);
+                        }
+                  }
+
+                  // Проверяем наличие MeshCollider для взаимодействия
+                  EnsureMeshCollider(plane);
+
+                  // Обновляем списки вертикальных и горизонтальных плоскостей
+                  bool isVertical = IsVerticalPlane(plane);
+                  if (isVertical && !verticalPlanes.Contains(plane))
+                  {
+                        verticalPlanes.Add(plane);
+                        horizontalPlanes.Remove(plane); // На всякий случай удалим из другого списка
+                        Debug.Log($"Плоскость {plane.trackableId} добавлена в список вертикальных");
+                  }
+                  else if (!isVertical && !horizontalPlanes.Contains(plane))
+                  {
+                        horizontalPlanes.Add(plane);
+                        verticalPlanes.Remove(plane); // На всякий случай удалим из другого списка
+                        Debug.Log($"Плоскость {plane.trackableId} добавлена в список горизонтальных");
+                  }
+            }
+
+            /// <summary>
+            /// Корутина для отложенной проверки активации плоскости
+            /// </summary>
+            private System.Collections.IEnumerator DelayedActivationCheck(ARPlane plane = null)
+            {
+                  yield return new WaitForSeconds(0.1f);
+
+                  if (plane != null && !plane.gameObject.activeInHierarchy)
+                  {
+                        // Пробуем еще раз активировать
+                        try
+                        {
+                              plane.gameObject.SetActive(true);
+                              Debug.Log($"Повторная попытка активации плоскости: {plane.trackableId}");
+
+                              // Проверяем родителя
+                              if (plane.transform.parent != null)
+                              {
+                                    plane.transform.parent.gameObject.SetActive(true);
+                                    Debug.Log($"Активирован родитель плоскости: {plane.transform.parent.name}");
+                              }
+                        }
+                        catch (System.Exception e)
+                        {
+                              Debug.LogError($"Ошибка при повторной активации плоскости: {e.Message}");
+                        }
+                  }
+            }
+
+            /// <summary>
+            /// Проверяет, является ли плоскость вертикальной (стеной)
+            /// </summary>
+            public bool IsVerticalPlane(ARPlane plane)
+            {
+                  if (plane == null)
+                  {
+                        Debug.LogError("IsVerticalPlane: ARPlane is null");
+                        return false;
+                  }
+
+                  // В AR Foundation 6.0 используем Vector3.up и проверяем угол между нормалью плоскости и вектором вверх
+                  Vector3 planeNormal = plane.normal;
+                  float angle = Vector3.Angle(planeNormal, Vector3.up);
+
+                  // Если угол ближе к 90 градусам (с меньшим допуском), то это вертикальная плоскость (стена)
+                  // Используем более строгий критерий - угол должен быть от 70 до 110 градусов
+                  bool isVertical = angle > 70 && angle < 110;
+
+                  // Дополнительно проверяем, что плоскость достаточно высока для стены
+                  if (isVertical && plane.size.y < 0.5f)
+                  {
+                        // Если плоскость слишком маленькая по высоте, это может быть не стена
+                        Debug.Log($"Плоскость {plane.trackableId} похожа на стену по углу ({angle}°), но слишком маленькая по высоте ({plane.size.y}м)");
+                        isVertical = false;
+                  }
+
+                  if (isVertical)
+                  {
+                        Debug.Log($"Plane {plane.trackableId} identified as vertical wall (angle: {angle}°, size: {plane.size})");
+                  }
+                  else
+                  {
+                        Debug.Log($"Plane {plane.trackableId} identified as horizontal floor/ceiling (angle: {angle}°, size: {plane.size})");
+                  }
+
+                  return isVertical;
+            }
+
+            /// <summary>
+            /// Убеждается, что у плоскости есть MeshCollider
+            /// </summary>
+            private void EnsureMeshCollider(GameObject planeObject)
+            {
+                  if (planeObject == null)
+                  {
+                        Debug.LogError("EnsureMeshCollider: GameObject is null");
+                        return;
+                  }
+
+                  MeshCollider meshCollider = planeObject.GetComponent<MeshCollider>();
+                  if (meshCollider == null)
+                  {
+                        Debug.Log($"Добавляем MeshCollider к {planeObject.name}");
+                        meshCollider = planeObject.AddComponent<MeshCollider>();
+                  }
+
+                  // Проверяем, есть ли у объекта MeshFilter с mesh
+                  MeshFilter meshFilter = planeObject.GetComponent<MeshFilter>();
+                  if (meshFilter != null && meshFilter.mesh != null)
+                  {
+                        meshCollider.sharedMesh = meshFilter.mesh;
+                        Debug.Log($"Установлен shared mesh для MeshCollider на {planeObject.name}");
+                  }
+                  else
+                  {
+                        Debug.LogWarning($"MeshFilter или mesh не найден на {planeObject.name}");
+                  }
+            }
+
+            // Overload for ARPlane objects
+            private void EnsureMeshCollider(ARPlane plane)
+            {
+                  if (plane == null)
+                  {
+                        Debug.LogError("EnsureMeshCollider: ARPlane is null");
+                        return;
+                  }
+
+                  EnsureMeshCollider(plane.gameObject);
+            }
+
+            /// <summary>
+            /// Обновляет видимость для всех существующих плоскостей
+            /// </summary>
+            public void UpdateAllPlanesVisibility()
+            {
+                  if (planeManager == null) return;
+
+                  foreach (ARPlane plane in planeManager.trackables)
+                  {
+                        UpdatePlaneVisibility(plane);
+                  }
+            }
+
+            /// <summary>
+            /// Включает или отключает видимость AR плоскостей
+            /// </summary>
+            public void SetPlaneVisibility(bool visible)
+            {
+                  autoActivatePlanes = visible;
+                  UpdateAllPlanesVisibility();
+            }
+
+            /// <summary>
+            /// Включает или отключает подсветку вертикальных плоскостей (стен)
+            /// </summary>
+            public void SetHighlightWalls(bool highlight)
+            {
+                  highlightVerticalPlanes = highlight;
+                  UpdateAllPlanesVisibility();
+            }
+
+            /// <summary>
+            /// Сбрасывает все плоскости в их исходное состояние
+            /// Восстанавливает оригинальные материалы и настройки
+            /// </summary>
+            public void ResetAllPlanes()
+            {
+                  if (planeManager == null)
+                  {
+                        Debug.LogWarning("AR Plane Manager не найден при попытке сброса плоскостей");
+                        return;
+                  }
+
+                  Debug.Log("Сброс всех плоскостей в исходное состояние...");
+
+                  // Перебираем все плоскости и восстанавливаем их оригинальные материалы
+                  foreach (ARPlane plane in planeManager.trackables)
+                  {
+                        if (plane != null)
+                        {
+                              TrackableId trackableId = plane.trackableId;
+                              // Восстанавливаем оригинальный материал, если он существует
+                              if (originalMaterials.ContainsKey(trackableId))
+                              {
+                                    GameObject planeObj = plane.gameObject;
+                                    if (planeObj != null)
+                                    {
+                                          MeshRenderer renderer = planeObj.GetComponentInChildren<MeshRenderer>();
+                                          if (renderer != null)
+                                          {
+                                                renderer.material = originalMaterials[trackableId];
+                                                Debug.Log($"Восстановлен оригинальный материал для плоскости {trackableId}");
+                                          }
+                                    }
+                              }
+                        }
+                  }
+
+                  // Обновляем видимость всех плоскостей
+                  UpdateAllPlanesVisibility();
+            }
+
+            /// <summary>
+            /// Принудительно показывает все плоскости
+            /// </summary>
+            public void ForceShowAllPlanes()
+            {
+                  if (planeManager == null)
+                  {
+                        Debug.LogWarning("AR Plane Manager не найден при попытке форсированного показа плоскостей");
+                        return;
+                  }
+
+                  // Убеждаемся, что AR Plane Manager включен
+                  if (!planeManager.enabled)
+                  {
+                        planeManager.enabled = true;
+                        Debug.Log("AR Plane Manager был отключен и теперь включен");
+                  }
+
+                  // Убеждаемся, что настройки плоскостей корректны
+                  planeManager.requestedDetectionMode = PlaneDetectionMode.Vertical | PlaneDetectionMode.Horizontal;
+
+                  // Устанавливаем флаг видимости в true
+                  autoActivatePlanes = true;
+                  highlightVerticalPlanes = true;
+
+                  int planeCount = planeManager.trackables.count;
+                  Debug.Log($"ВАЖНО: Начинаем принудительную активацию плоскостей. Всего плоскостей: {planeCount}");
+
+                  if (planeCount == 0)
+                  {
+                        Debug.LogWarning("Не обнаружено ни одной плоскости! Пожалуйста, подвигайте устройством для обнаружения плоскостей.");
+                        // Создаем демо-панель для рисования, чтобы что-то было видно
+                        try
+                        {
+                              CreateDefaultPaintableSurface(2.0f, 1.5f);
+                              Debug.Log("Создана демо-панель для рисования (плоскости отсутствуют)");
+                        }
+                        catch (System.Exception ex)
+                        {
+                              Debug.LogError($"Ошибка при создании демо-панели: {ex.Message}");
+                        }
+                        // НЕ делаем return чтобы код ниже все равно выполнился для плоскостей,
+                        // которые могут появиться позже или не были подсчитаны корректно
+                  }
+
+                  // Перебираем все плоскости и принудительно их активируем
+                  int activatedCount = 0;
+                  int wallCount = 0;
+
+                  // Сначала очистим словарь визуализаций, чтобы гарантировать пересоздание
+                  planeVisualizations.Clear();
+
+                  // Теперь создадим визуализации для всех плоскостей
+                  foreach (ARPlane plane in planeManager.trackables)
+                  {
+                        if (plane != null && plane.gameObject != null)
+                        {
+                              // Принудительно активируем игровой объект плоскости и всех родителей
+                              if (!plane.gameObject.activeInHierarchy)
+                              {
+                                    plane.gameObject.SetActive(true);
+                                    Debug.Log($"Активирован объект плоскости: {plane.trackableId}");
+
+                                    // Активируем всех родителей
+                                    Transform parent = plane.transform.parent;
+                                    while (parent != null)
+                                    {
+                                          if (!parent.gameObject.activeInHierarchy)
+                                          {
+                                                parent.gameObject.SetActive(true);
+                                                Debug.Log($"Активирован родитель плоскости: {parent.name}");
+                                          }
+                                          parent = parent.parent;
+                                    }
+                              }
+
+                              // Удаляем существующую визуализацию, если она есть
+                              RemoveCustomVisualization(plane);
+
+                              // Проверяем, является ли плоскость стеной
+                              bool isWall = IsVerticalPlane(plane);
+                              if (isWall)
+                              {
+                                    wallCount++;
+                                    Debug.Log($"ОБНАРУЖЕНА СТЕНА: {plane.trackableId} на позиции {plane.transform.position}, размер: {plane.size}");
+                              }
+
+                              // Создаем новую пользовательскую визуализацию
+                              GameObject visualization = CreateCustomPlaneVisualization(plane);
+
+                              if (visualization != null)
+                              {
+                                    // Обеспечиваем наличие MeshCollider для взаимодействия
+                                    EnsureMeshCollider(plane.gameObject);
+                                    activatedCount++;
+                              }
+                        }
+                  }
+
+                  Debug.Log($"ВАЖНО: Принудительно активировано {activatedCount} плоскостей из {planeCount} доступных");
+                  Debug.Log($"ВАЖНО: Обнаружено стен: {wallCount}");
+
+                  // Запускаем проверку видимости плоскостей
+                  StartCoroutine(CheckPlanesVisibilityAfterDelay());
+            }
+
+            /// <summary>
+            /// Активирует AR камеру, сессию и префаб плоскости, чтобы гарантировать их работу
+            /// </summary>
+            private void EnsureARComponentsAreActive()
+            {
+                  // Активируем AR Session
+                  ARSession arSession = FindFirstObjectByType<ARSession>();
+                  if (arSession != null)
+                  {
+                        if (!arSession.gameObject.activeInHierarchy)
+                        {
+                              arSession.gameObject.SetActive(true);
+                              Debug.Log("Активирована AR Session");
+                        }
+
+                        if (!arSession.enabled)
+                        {
+                              arSession.enabled = true;
+                              Debug.Log("Включен компонент AR Session");
+                        }
+                  }
+                  else
+                  {
+                        Debug.LogWarning("AR Session не найдена в сцене");
+                  }
+
+                  // Активируем AR Camera
+                  ARCameraManager cameraManager = FindFirstObjectByType<ARCameraManager>();
+                  if (cameraManager != null)
+                  {
+                        if (!cameraManager.gameObject.activeInHierarchy)
+                        {
+                              cameraManager.gameObject.SetActive(true);
+                              Debug.Log("Активирована AR Camera");
+                        }
+
+                        if (!cameraManager.enabled)
+                        {
+                              cameraManager.enabled = true;
+                              Debug.Log("Включен компонент AR Camera Manager");
+                        }
+
+                        // Проверяем камеру
+                        Camera camera = cameraManager.GetComponent<Camera>();
+                        if (camera != null && !camera.enabled)
+                        {
+                              camera.enabled = true;
+                              Debug.Log("Включена камера на AR Camera");
+                        }
+                  }
+                  else
+                  {
+                        Debug.LogWarning("AR Camera Manager не найден в сцене");
+                  }
+
+                  // Активируем AR Plane Manager
+                  if (planeManager != null)
+                  {
+                        if (!planeManager.gameObject.activeInHierarchy)
+                        {
+                              planeManager.gameObject.SetActive(true);
+                              Debug.Log("Активирован AR Plane Manager");
+                        }
+
+                        if (!planeManager.enabled)
+                        {
+                              planeManager.enabled = true;
+                              Debug.Log("Включен компонент AR Plane Manager");
+                        }
+
+                        // Активируем префаб плоскости, если он есть
+                        if (planeManager.planePrefab != null && !planeManager.planePrefab.activeSelf)
+                        {
+                              planeManager.planePrefab.SetActive(true);
+                              Debug.Log("Активирован префаб плоскости");
+                        }
+                  }
+                  else
+                  {
+                        Debug.LogWarning("AR Plane Manager не найден в сцене");
+                  }
+            }
+
+            /// <summary>
+            /// Создает специальную визуализацию для AR плоскости
+            /// </summary>
+            private GameObject CreateCustomPlaneVisualization(ARPlane plane)
+            {
+                  if (plane == null)
+                  {
+                        Debug.LogError("CreateCustomPlaneVisualization: плоскость равна null");
+                        return null;
+                  }
+
+                  if (!plane.gameObject.activeInHierarchy)
+                  {
+                        Debug.LogWarning($"CreateCustomPlaneVisualization: плоскость {plane.trackableId} неактивна, активируем её");
+
+                        // Сначала активируем родителей, чтобы гарантировать активацию самой плоскости
+                        Transform parent = plane.transform.parent;
+                        while (parent != null)
+                        {
+                              if (!parent.gameObject.activeInHierarchy)
+                              {
+                                    parent.gameObject.SetActive(true);
+                                    Debug.Log($"Активирован родитель плоскости {plane.trackableId}: {parent.name}");
+                              }
+                              parent = parent.parent;
+                        }
+
+                        // Теперь активируем саму плоскость
+                        plane.gameObject.SetActive(true);
+                  }
+
+                  // Проверяем, существует ли уже визуализация для этой плоскости
+                  string visualName = $"CustomVisual_{plane.trackableId}";
+                  Transform existingVisual = plane.transform.Find(visualName);
+
+                  if (existingVisual != null)
+                  {
+                        // Если визуализация уже существует, проверяем её состояние
+                        if (!existingVisual.gameObject.activeSelf)
+                        {
+                              existingVisual.gameObject.SetActive(true);
+                              Debug.Log($"Активирована существующая визуализация для {plane.trackableId}");
+                        }
+
+                        // Обновляем визуализацию только если меш плоскости изменился
+                        MeshFilter planeMeshFilter = plane.GetComponent<MeshFilter>();
+                        MeshFilter visualMeshFilter = existingVisual.GetComponent<MeshFilter>();
+
+                        if (planeMeshFilter != null && visualMeshFilter != null &&
+                            planeMeshFilter.mesh != null && visualMeshFilter.mesh != null &&
+                            planeMeshFilter.mesh.vertexCount != visualMeshFilter.mesh.vertexCount)
+                        {
+                              UpdatePlaneVisualizationMesh(existingVisual.gameObject, plane);
+                              Debug.Log($"Обновлен меш визуализации для {plane.trackableId}");
+                        }
+
+                        return existingVisual.gameObject;
+                  }
+
+                  Debug.Log($"Создание новой визуализации для плоскости {plane.trackableId}");
+
+                  // Создаем новый объект для визуализации
+                  GameObject visualObject = new GameObject(visualName);
+                  visualObject.transform.SetParent(plane.transform, false);
+                  visualObject.transform.localPosition = new Vector3(0, 0.005f, 0); // Немного поднимаем над плоскостью
+                  visualObject.transform.localRotation = Quaternion.identity;
+                  visualObject.transform.localScale = Vector3.one;
+
+                  // Добавляем компоненты
+                  MeshFilter meshFilter = visualObject.AddComponent<MeshFilter>();
+                  MeshRenderer meshRenderer = visualObject.AddComponent<MeshRenderer>();
+
+                  // Устанавливаем настройки рендеринга
+                  meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                  meshRenderer.receiveShadows = false;
+                  meshRenderer.allowOcclusionWhenDynamic = false;
+
+                  // Определяем тип плоскости и применяем соответствующий материал
+                  bool isWall = IsVerticalPlane(plane);
+
+                  // Создаем специальный материал для каждого объекта, чтобы избежать конфликтов
+                  Material material = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+
+                  if (isWall)
+                  {
+                        // Для стен используем ярко-красный материал
+                        material.color = new Color(1.0f, 0.0f, 0.0f, 1.0f);
+
+                        // Включаем эмиссию для большей яркости
+                        if (material.HasProperty("_EmissionColor"))
+                        {
+                              material.EnableKeyword("_EMISSION");
+                              material.SetColor("_EmissionColor", new Color(1.0f, 0.0f, 0.0f, 1.0f) * 3.0f);
+                        }
+                  }
+                  else
+                  {
+                        // Для пола используем ярко-зеленый материал
+                        material.color = new Color(0.0f, 1.0f, 0.0f, 1.0f);
+
+                        // Включаем эмиссию для большей яркости
+                        if (material.HasProperty("_EmissionColor"))
+                        {
+                              material.EnableKeyword("_EMISSION");
+                              material.SetColor("_EmissionColor", new Color(0.0f, 1.0f, 0.0f, 1.0f) * 3.0f);
+                        }
+                  }
+
+                  // Применяем созданный материал к рендереру
+                  meshRenderer.material = material;
+
+                  // Копируем меш из плоскости или создаем прямоугольный меш
+                  UpdatePlaneVisualizationMesh(visualObject, plane);
+
+                  // Отключаем стандартный рендерер AR плоскости, чтобы избежать наложения
+                  MeshRenderer planeRenderer = plane.GetComponent<MeshRenderer>();
+                  if (planeRenderer != null)
+                  {
+                        planeRenderer.enabled = false;
+                  }
+
+                  // Делаем объект визуализации активным
+                  visualObject.SetActive(true);
+
+                  // Сохраняем ссылку на визуализацию в словаре
+                  planeVisualizations[plane.trackableId] = visualObject;
+
+                  Debug.Log($"Создана новая визуализация для плоскости {plane.trackableId}");
+                  return visualObject;
+            }
+
+            /// <summary>
+            /// Обновляет меш для визуализации плоскости
+            /// </summary>
+            private void UpdatePlaneVisualizationMesh(GameObject visualObject, ARPlane plane)
+            {
+                  if (visualObject == null || plane == null)
+                        return;
+
+                  MeshFilter meshFilter = visualObject.GetComponent<MeshFilter>();
+                  if (meshFilter == null)
+                        return;
+
+                  // Пытаемся взять меш из компонента плоскости
+                  MeshFilter planeMeshFilter = plane.GetComponent<MeshFilter>();
+
+                  if (planeMeshFilter != null && planeMeshFilter.mesh != null)
+                  {
+                        try
+                        {
+                              // Копируем меш
+                              Mesh sharedMesh = planeMeshFilter.sharedMesh;
+                              if (sharedMesh != null)
+                              {
+                                    // Создаем копию меша
+                                    Mesh newMesh = new Mesh();
+                                    newMesh.vertices = sharedMesh.vertices;
+                                    newMesh.triangles = sharedMesh.triangles;
+                                    newMesh.normals = sharedMesh.normals;
+                                    newMesh.uv = sharedMesh.uv;
+
+                                    meshFilter.mesh = newMesh;
+                                    return;
+                              }
+                        }
+                        catch (System.Exception e)
+                        {
+                              Debug.LogError($"Ошибка при копировании меша: {e.Message}");
+                        }
+                  }
+
+                  // Если не удалось скопировать меш, создаем простой прямоугольник
+                  Mesh simpleMesh = new Mesh();
+
+                  // Получаем размеры плоскости
+                  Vector2 size = plane.size;
+                  float width = size.x;
+                  float height = size.y;
+
+                  // Если размеры слишком малы, используем минимальные значения
+                  width = Mathf.Max(width, 0.1f);
+                  height = Mathf.Max(height, 0.1f);
+
+                  // Создаем простой прямоугольник
+                  Vector3[] vertices = new Vector3[4]
+                  {
+                        new Vector3(-width/2, 0, -height/2),
+                        new Vector3(width/2, 0, -height/2),
+                        new Vector3(width/2, 0, height/2),
+                        new Vector3(-width/2, 0, height/2)
+                  };
+
+                  int[] triangles = new int[6]
+                  {
+                        0, 1, 2,
+                        0, 2, 3
+                  };
+
+                  Vector2[] uv = new Vector2[4]
+                  {
+                        new Vector2(0, 0),
+                        new Vector2(1, 0),
+                        new Vector2(1, 1),
+                        new Vector2(0, 1)
+                  };
+
+                  Vector3[] normals = new Vector3[4]
+                  {
+                        Vector3.up,
+                        Vector3.up,
+                        Vector3.up,
+                        Vector3.up
+                  };
+
+                  simpleMesh.vertices = vertices;
+                  simpleMesh.triangles = triangles;
+                  simpleMesh.uv = uv;
+                  simpleMesh.normals = normals;
+
+                  meshFilter.mesh = simpleMesh;
+            }
+
+            /// <summary>
+            /// Находит плоскость по клику на экране
+            /// </summary>
+            public ARPlane GetPlaneByScreenPosition(Vector2 screenPosition, ARRaycastManager raycastManager, Camera arCamera)
+            {
+                  if (raycastManager == null)
+                  {
+                        Debug.LogError("ARRaycastManager не найден");
+                        return null;
+                  }
+
+                  if (arCamera == null)
+                  {
+                        Debug.LogError("AR Camera не найдена");
+                        return null;
+                  }
+
+                  // Для хранения результатов raycast
+                  List<ARRaycastHit> raycastHits = new List<ARRaycastHit>();
+
+                  // Используем все возможные типы трекабельных объектов для максимального охвата
+                  TrackableType trackableTypes =
+                        TrackableType.PlaneWithinPolygon |
+                        TrackableType.PlaneEstimated |
+                        TrackableType.PlaneWithinBounds |
+                        TrackableType.AllTypes;
+
+                  // Выполняем raycast
+                  if (raycastManager.Raycast(screenPosition, raycastHits, trackableTypes))
+                  {
+                        // Сортируем попадания по расстоянию (ближайшие первыми)
+                        raycastHits.Sort((hit1, hit2) => hit1.distance.CompareTo(hit2.distance));
+
+                        // Сначала пробуем найти стену среди попаданий
+                        foreach (var hit in raycastHits)
+                        {
+                              // Выводим информацию о попадании
+                              Debug.Log($"Попадание в позиции {hit.pose.position}, trackableId: {hit.trackableId}, расстояние: {hit.distance}");
+
+                              // Проверяем, есть ли плоскость с таким id
+                              if (planeManager != null)
+                              {
+                                    ARPlane plane = planeManager.GetPlane(hit.trackableId);
+                                    if (plane != null)
+                                    {
+                                          Debug.Log($"Найдена плоскость: {plane.trackableId}, смещение: {plane.center}, размер: {plane.size}");
+
+                                          // Если это стена, сразу возвращаем ее
+                                          if (IsVerticalPlane(plane))
+                                          {
+                                                Debug.Log($"Это вертикальная плоскость (стена) - возвращаем ее");
+                                                return plane;
+                                          }
+                                    }
+                              }
+                        }
+
+                        // Если стены не найдены, возвращаем ближайшую плоскость
+                        ARRaycastHit closestHit = raycastHits[0];
+                        if (planeManager != null)
+                        {
+                              ARPlane plane = planeManager.GetPlane(closestHit.trackableId);
+                              if (plane != null)
+                              {
+                                    // Проверяем, есть ли у плоскости кастомная визуализация
+                                    string visualName = $"CustomVisual_{plane.trackableId}";
+                                    Transform visualTrans = plane.transform.Find(visualName);
+                                    if (visualTrans != null)
+                                    {
+                                          Debug.Log($"Найдена кастомная визуализация для плоскости {plane.trackableId}");
+                                    }
+
+                                    return plane;
+                              }
+                              else
+                              {
+                                    Debug.LogWarning($"Плоскость с ID {closestHit.trackableId} не найдена в ARPlaneManager");
+                              }
+                        }
+                  }
+                  else
+                  {
+                        Debug.Log("Луч не попал ни в одну из распознанных плоскостей");
+                  }
+
+                  return null;
+            }
+
+            /// <summary>
+            /// Проверяет, можно ли взаимодействовать с точкой на экране (не на UI)
+            /// </summary>
+            public bool CanInteractWithPoint(Vector2 screenPosition)
+            {
+                  // Проверяем, что точка не находится над UI элементами
+                  if (UnityEngine.EventSystems.EventSystem.current != null)
+                  {
+                        if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+                        {
+                              return false;
+                        }
+
+                        // Проверка для мобильных устройств
+                        if (Input.touchCount > 0)
+                        {
+                              Touch touch = Input.GetTouch(0);
+                              if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject(touch.fingerId))
+                              {
+                                    return false;
+                              }
+                        }
+                  }
+
+                  return true;
+            }
+
+            private void Update()
+            {
+                  // Удалим обновление визуализаций каждый кадр, т.к. это вызывает проблемы производительности
+                  // UpdateAllVisualizations();
+            }
+
+            private void Start()
+            {
+                  // Активируем AR компоненты перед использованием
+                  EnsureARComponentsAreActive();
+
+                  // Принудительно создаем стены, если приложение запущено в тестовом режиме
+                  CreateDefaultWallForPainting();
+
+                  // Вызываем принудительное отображение плоскостей сразу
+                  ForceShowAllPlanes();
+
+                  // Запускаем корутину для постоянной проверки видимости плоскостей
+                  StartCoroutine(EnsurePlanesVisibilityCoroutine());
+
+                  // Создаем независимые визуализации (основной гарантированный механизм)
+                  Invoke("CreateIndependentVisualizationsForAllPlanes", 0.5f);
+                  InvokeRepeating("CreateIndependentVisualizationsForAllPlanes", 2.0f, 3.0f);
+
+                  // Запускаем диагностику видимости плоскостей
+                  InvokeRepeating("DebugAllPlanesVisibility", 2.0f, 5.0f);
+
+                  // Также запланируем повторные вызовы с интервалами, чтобы обработать плоскости,
+                  // которые могут быть обнаружены позже, но с большим интервалом
+                  InvokeRepeating("ForceShowAllPlanes", 1.0f, 3.0f);
+
+                  // Создаем демо-панели для рисования после небольшой задержки
+                  Invoke("CreateDemoPaintableSurfaces", 1.0f);
+
+                  // Запускаем вторую волну обновлений с большей задержкой
+                  Invoke("DelayedForceShowAllPlanes", 7.0f);
+            }
+
+            /// <summary>
+            /// Создает вертикальные стены по умолчанию для рисования, не зависящие от AR-обнаружения
+            /// </summary>
+            private void CreateDefaultWallForPainting()
+            {
+                  Debug.Log("Создаем гарантированные стены для рисования");
+
+                  try
+                  {
+                        // Создаем несколько стен вокруг пользователя
+
+                        // Стена прямо перед пользователем
+                        CreateWallAtPosition(new Vector3(0, 0, 2f),
+                                           Quaternion.Euler(0, 180, 0),
+                                           new Vector3(3f, 2.5f, 1f),
+                                           new Color(1f, 0.3f, 0.3f, 1f),
+                                           "DefaultWall_Front");
+
+                        // Стена слева
+                        CreateWallAtPosition(new Vector3(-1.5f, 0, 0.5f),
+                                           Quaternion.Euler(0, 90, 0),
+                                           new Vector3(3f, 2.5f, 1f),
+                                           new Color(0.3f, 1f, 0.3f, 1f),
+                                           "DefaultWall_Left");
+
+                        // Стена справа
+                        CreateWallAtPosition(new Vector3(1.5f, 0, 0.5f),
+                                           Quaternion.Euler(0, -90, 0),
+                                           new Vector3(3f, 2.5f, 1f),
+                                           new Color(0.3f, 0.3f, 1f, 1f),
+                                           "DefaultWall_Right");
+
+                        // Стена позади (меньшего размера)
+                        CreateWallAtPosition(new Vector3(0, 0, -1.5f),
+                                           Quaternion.Euler(0, 0, 0),
+                                           new Vector3(2.5f, 2f, 1f),
+                                           new Color(1f, 1f, 0.3f, 1f),
+                                           "DefaultWall_Back");
+
+                        // Стена под углом (для разнообразия)
+                        CreateWallAtPosition(new Vector3(-1.2f, 0, 1.5f),
+                                           Quaternion.Euler(0, 135, 0),
+                                           new Vector3(2f, 2.2f, 1f),
+                                           new Color(1f, 0.5f, 0.8f, 1f),
+                                           "DefaultWall_Angled");
+
+                        Debug.Log("Успешно создано несколько стен для рисования");
+                  }
+                  catch (System.Exception ex)
+                  {
+                        Debug.LogError($"Ошибка при создании гарантированных стен: {ex.Message}\n{ex.StackTrace}");
+                  }
+            }
+
+            /// <summary>
+            /// Создает стену в указанной позиции
+            /// </summary>
+            private void CreateWallAtPosition(Vector3 position, Quaternion rotation, Vector3 scale, Color color, string name)
+            {
+                  // Создаем родительский объект для стены
+                  GameObject wallParent = new GameObject(name + "_Parent");
+                  wallParent.transform.position = position;
+                  wallParent.transform.rotation = rotation;
+
+                  // Создаем объект стены
+                  GameObject wall = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                  wall.name = name;
+                  wall.transform.SetParent(wallParent.transform, false);
+                  wall.transform.localScale = scale;
+                  wall.transform.localPosition = Vector3.zero;
+
+                  // Задаем материал стены
+                  Renderer renderer = wall.GetComponent<Renderer>();
+                  if (renderer != null)
+                  {
+                        Material wallMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                        wallMaterial.color = color;
+
+                        // Включаем эмиссию для лучшей видимости
+                        if (wallMaterial.HasProperty("_EmissionColor"))
+                        {
+                              wallMaterial.EnableKeyword("_EMISSION");
+                              wallMaterial.SetColor("_EmissionColor", color * 2f);
+                        }
+
+                        renderer.material = wallMaterial;
+                        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                        renderer.receiveShadows = false;
+                  }
+
+                  // Добавляем компоненты для взаимодействия
+                  if (!wall.TryGetComponent<MeshCollider>(out _))
+                  {
+                        wall.AddComponent<MeshCollider>();
+                  }
+
+                  // Имитируем ARPlane, добавив специальный компонент
+                  ARPlaneSimulation planeSimulation = wall.AddComponent<ARPlaneSimulation>();
+                  planeSimulation.isVertical = true;
+
+                  // Добавляем PaintableSurface компонент для непосредственного рисования
+                  if (!wall.TryGetComponent<Remalux.AR.PaintableSurface>(out _))
+                  {
+                        var paintableSurface = wall.AddComponent<Remalux.AR.PaintableSurface>();
+                        // Устанавливаем цвет и размеры для PaintableSurface
+                        paintableSurface.SetColor(color);
+                        paintableSurface.SetSize(scale.x, scale.y);
+                  }
+
+                  // Сигнализируем о созданной стене
+                  NotifyWallCreated(wall);
+
+                  Debug.Log($"Создана стена {name} на позиции {position}");
+            }
+
+            /// <summary>
+            /// Простой компонент для имитации ARPlane
+            /// </summary>
+            public class ARPlaneSimulation : MonoBehaviour
+            {
+                  public bool isVertical = true;
+                  public string planeId = System.Guid.NewGuid().ToString();
+                  public Vector2 size;
+            }
+
+            /// <summary>
+            /// Обрабатывает создание стены
+            /// </summary>
+            private void NotifyWallCreated(GameObject wall)
+            {
+                  Debug.Log($"Wall created: {wall.name}");
+
+                  // Find wall painter and notify it about new wall
+                  var wallPainter = Remalux.AR.Utilities.ObjectFinder.FindFirstObject<Remalux.AR.WallPainter>();
+                  if (wallPainter != null)
+                  {
+                        wallPainter.OnDemoWallCreated(wall);
+                  }
+                  else
+                  {
+                        Debug.LogWarning("WallPainter not found, cannot notify about new wall");
+                  }
+
+                  // Notify UI about new walls available
+                  ShowNotification("Wall created, now you can paint on it!");
+            }
+
+            /// <summary>
+            /// Показывает уведомление пользователю
+            /// </summary>
+            private void ShowNotification(string message)
+            {
+                  // Call the overloaded version with default duration
+                  ShowNotification(message, 2.0f);
+            }
+
+            /// <summary>
+            /// Создает демонстрационные окрашиваемые поверхности в указанных позициях
+            /// </summary>
+            public void CreateDemoPaintableSurfaces()
+            {
+                  Debug.Log("Creating demo paintable surfaces");
+
+                  // Проверяем, есть ли уже реальные AR плоскости
+                  bool hasRealPlanes = false;
+
+                  if (planeManager != null && planeManager.trackables.count > 0)
+                  {
+                        foreach (ARPlane plane in planeManager.trackables)
+                        {
+                              if (plane != null && plane.gameObject.activeInHierarchy)
+                              {
+                                    // Если найдена хотя бы одна активная плоскость
+                                    hasRealPlanes = true;
+                                    Debug.Log("Найдены настоящие AR плоскости. Пропускаем создание демо-поверхностей.");
+                                    break;
+                              }
+                        }
+                  }
+
+                  if (hasRealPlanes)
+                  {
+                        // Если есть реальные AR плоскости, не создаем демо-поверхности
+                        ShowNotification("Обнаружены AR плоскости. Используйте их для рисования.", 3.0f);
+                        return;
+                  }
+
+                  if (!IsEditorOrTestMode())
+                  {
+                        Debug.Log("Skipping demo surfaces - not in editor or test mode");
+                        return;
+                  }
+
+                  // Создаем контейнер для поверхностей
+                  if (_demoSurfacesParent == null)
+                  {
+                        _demoSurfacesParent = new GameObject("Demo Paintable Surfaces").transform;
+                  }
+
+                  StartCoroutine(CreatePanelsWithDelay());
+            }
+
+            private System.Collections.IEnumerator CreatePanelsWithDelay()
+            {
+                  yield return new WaitForSeconds(0.5f);
+
+                  float standardHeight = 2.0f;
+                  float standardWidth = 1.5f;
+
+                  // Получаем AR камеру для позиционирования относительно нее
+                  Camera arCamera = null;
+                  var cameraManager = ObjectFinder.FindFirstObject<ARCameraManager>();
+                  if (cameraManager != null)
+                  {
+                        arCamera = cameraManager.GetComponent<Camera>();
+                  }
+
+                  if (arCamera == null)
+                  {
+                        arCamera = Camera.main;
+                        if (arCamera == null)
+                        {
+                              Debug.LogError("Не найдена AR камера для позиционирования стен");
+                              yield break;
+                        }
+                  }
+
+                  // Расстояние от камеры, на котором будут размещены стены
+                  float distance = 2.5f;
+
+                  // Позиции для создания поверхностей относительно камеры
+                  Transform camTransform = arCamera.transform;
+                  Vector3 forwardPos = camTransform.position + camTransform.forward * distance;
+                  Vector3 leftPos = camTransform.position + (-camTransform.right * distance) + (camTransform.forward * 0.5f);
+                  Vector3 rightPos = camTransform.position + (camTransform.right * distance) + (camTransform.forward * 0.5f);
+
+                  // Фиксируем высоту стен на уровне глаз (немного ниже уровня камеры)
+                  float wallHeight = camTransform.position.y - 0.3f; // Немного ниже уровня глаз
+                  forwardPos.y = wallHeight;
+                  leftPos.y = wallHeight;
+                  rightPos.y = wallHeight;
+
+                  Vector3[] positions = new Vector3[] { forwardPos, leftPos, rightPos };
+
+                  // Разворачиваем стены лицом к камере
+                  Quaternion forwardRot = Quaternion.LookRotation(-camTransform.forward);
+                  Quaternion leftRot = Quaternion.LookRotation(camTransform.right);
+                  Quaternion rightRot = Quaternion.LookRotation(-camTransform.right);
+
+                  Quaternion[] rotations = new Quaternion[] { forwardRot, leftRot, rightRot };
+
+                  for (int i = 0; i < positions.Length; i++)
+                  {
+                        // Создаем новый объект для панели
+                        GameObject panel = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                        panel.name = $"Demo Panel {i + 1}";
+                        panel.transform.parent = _demoSurfacesParent;
+                        panel.transform.position = positions[i];
+                        panel.transform.rotation = rotations[i];
+                        panel.transform.localScale = new Vector3(standardWidth, standardHeight, 1);
+
+                        // Добавляем компонент ARPlaneSimulation для фиксации в AR пространстве
+                        var planeSimulation = panel.AddComponent<ARPlaneSimulation>();
+                        planeSimulation.isVertical = true; // Это вертикальная поверхность (стена)
+                        planeSimulation.size = new Vector2(standardWidth, standardHeight);
+
+                        // Добавляем Rigidbody с kinematic = true для лучшей физики без движения
+                        Rigidbody rb = panel.AddComponent<Rigidbody>();
+                        rb.isKinematic = true;
+                        rb.useGravity = false;
+
+                        // Добавляем MeshCollider для взаимодействия
+                        MeshCollider collider = panel.GetComponent<MeshCollider>();
+                        if (collider == null)
+                        {
+                              collider = panel.AddComponent<MeshCollider>();
+                        }
+
+                        // Добавляем компонент PaintableSurface от WallPainter
+                        var paintableSurface = panel.AddComponent<Remalux.AR.PaintableSurface>();
+
+                        // Устанавливаем размеры
+                        paintableSurface.SetSize(standardWidth, standardHeight);
+
+                        // Устанавливаем разные цвета для панелей
+                        Color panelColor = i == 0 ? Color.white : (i == 1 ? new Color(0.9f, 0.9f, 1.0f) : new Color(1.0f, 0.9f, 0.9f));
+                        paintableSurface.SetColor(panelColor);
+
+                        Debug.Log($"Created demo paintable surface {i + 1} at {positions[i]}, relative to camera at {camTransform.position}");
+
+                        // Добавляем в список отслеживаемых поверхностей для WallPainter
+                        NotifyWallCreated(panel);
+
+                        // Небольшая задержка между созданием панелей для визуального эффекта
+                        yield return new WaitForSeconds(0.3f);
+                  }
+
+                  ShowNotification("Созданы тестовые поверхности для рисования", 3.0f);
+            }
+
+            /// <summary>
+            /// Обрабатывает создание стены (переименовано для разрешения конфликта)
+            /// </summary>
+            private void OnDemoWallCreated(GameObject wall)
+            {
+                  try
+                  {
+                        // Используем ObjectFinder для поиска WallPainter
+                        var wallPainter = Remalux.AR.Utilities.ObjectFinder.FindFirstObject<Remalux.AR.WallPainter>();
+                        if (wallPainter != null)
+                        {
+                              wallPainter.OnDemoWallCreated(wall);
+                              return;
+                        }
+
+                        // Резервный метод поиска, если ObjectFinder не нашел компонент
+                        GameObject wallPainterObj = GameObject.FindWithTag("WallPainter");
+                        if (wallPainterObj == null)
+                        {
+                              wallPainterObj = GameObject.Find("WallPainter");
+                        }
+
+                        if (wallPainterObj != null)
+                        {
+                              var component = wallPainterObj.GetComponent<Remalux.AR.WallPainter>();
+                              if (component != null)
+                              {
+                                    component.OnDemoWallCreated(wall);
+                                    return;
+                              }
+                        }
+
+                        Debug.LogWarning("WallPainter не найден, невозможно уведомить о новой стене");
+                  }
+                  catch (System.Exception ex)
+                  {
+                        Debug.LogError($"Ошибка при обработке созданной стены: {ex.Message}");
+                  }
+            }
+
+            /// <summary>
+            /// Интерфейс для отображения уведомлений
+            /// </summary>
+            public interface INotificationUI
+            {
+                  void ShowNotification(string message, float duration = 2.0f);
+            }
+
+            /// <summary>
+            /// Показывает уведомление пользователю
+            /// </summary>
+            private void ShowNotification(string message, float duration = 2.0f)
+            {
+                  try
+                  {
+                        // Ищем любой объект с интерфейсом для отображения уведомлений
+                        var notificationUIs = ObjectFinder.FindAllObjects<MonoBehaviour>()
+                            .Where(mb => mb is INotificationUI)
+                            .Cast<INotificationUI>();
+
+                        if (notificationUIs.Any())
+                        {
+                              notificationUIs.First().ShowNotification(message, duration);
+                              return;
+                        }
+
+                        // Если не нашли по интерфейсу, ищем по имени метода через рефлексию
+                        var uiManagers = ObjectFinder.FindAllObjects<MonoBehaviour>();
+                        foreach (var manager in uiManagers)
+                        {
+                              // Проверяем, есть ли метод ShowNotification
+                              var method = manager.GetType().GetMethod("ShowNotification",
+                                  System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+
+                              if (method != null &&
+                                  method.GetParameters().Length >= 1 &&
+                                  method.GetParameters()[0].ParameterType == typeof(string))
+                              {
+                                    // Вызываем метод с правильными параметрами
+                                    if (method.GetParameters().Length == 1)
+                                    {
+                                          method.Invoke(manager, new object[] { message });
+                                    }
+                                    else
+                                    {
+                                          method.Invoke(manager, new object[] { message, duration });
+                                    }
+                                    return;
+                              }
+                        }
+
+                        // Если ничего не нашли, просто выводим в лог
+                        Debug.Log($"UI Notification: {message}");
+                  }
+                  catch (System.Exception ex)
+                  {
+                        Debug.LogError($"Error showing notification: {ex.Message}");
+                  }
+            }
+
+            /// <summary>
+            /// Корутина для создания панелей с задержками
+            /// </summary>
+            private IEnumerator CreatePanelsWithDelay(int screenWidth, int screenHeight)
+            {
+                  // Проверяем, распознаны ли уже плоскости
+                  bool hasPlanes = planeManager != null && planeManager.trackables.count > 0;
+
+                  if (!hasPlanes)
+                  {
+                        // Если плоскости еще не распознаны, создаем только 2 панели
+                        Debug.Log("Плоскости еще не распознаны. Создаем ограниченное число панелей.");
+
+                        // Создаем панель в центре (с задержкой)
+                        yield return new WaitForSeconds(0.5f);
+                        try
+                        {
+                              Vector3 centerPosition = new Vector3(0, 1f, 2f);
+                              CreateDefaultPaintableSurface(2.5f, 1.8f, centerPosition, new Color(1f, 0.9f, 0.2f, 1f));
+                        }
+                        catch (System.Exception e) { Debug.LogError($"Ошибка при создании центральной панели: {e.Message}"); }
+
+                        // Создаем панель ниже (с задержкой)
+                        yield return new WaitForSeconds(0.3f);
+                        try
+                        {
+                              Vector3 lowerPosition = new Vector3(0, 0.5f, 2f);
+                              CreateDefaultPaintableSurface(2.0f, 1.5f, lowerPosition, new Color(0.9f, 0.5f, 0.9f, 1f));
+                        }
+                        catch (System.Exception e) { Debug.LogError($"Ошибка при создании дефолтной панели: {e.Message}"); }
+
+                        Debug.Log("Созданы две демонстрационные панели в режиме с ограниченным числом плоскостей");
+                        yield break;
+                  }
+
+                  // Если плоскости есть, создаем больше панелей для демонстрации
+                  // Создаем панель в центре (с задержкой)
+                  yield return new WaitForSeconds(0.2f);
+                  try
+                  {
+                        Vector3 centerPosition = new Vector3(0, 1f, 2f);
+                        CreateDefaultPaintableSurface(2.0f, 1.5f, centerPosition, new Color(1f, 0.9f, 0.2f, 1f));
+                  }
+                  catch (System.Exception e) { Debug.LogError($"Ошибка при создании центральной панели: {e.Message}"); }
+
+                  // Создаем панель слева (с задержкой)
+                  yield return new WaitForSeconds(0.2f);
+                  try
+                  {
+                        Vector3 leftPosition = new Vector3(-1f, 1f, 1.5f);
+                        CreateDefaultPaintableSurface(1.5f, 2.0f, leftPosition, new Color(0.5f, 0.9f, 1f, 1f));
+                  }
+                  catch (System.Exception e) { Debug.LogError($"Ошибка при создании левой панели: {e.Message}"); }
+
+                  // Создаем панель справа (с задержкой)
+                  yield return new WaitForSeconds(0.2f);
+                  try
+                  {
+                        Vector3 rightPosition = new Vector3(1f, 1f, 1.5f);
+                        CreateDefaultPaintableSurface(1.5f, 2.0f, rightPosition, new Color(1f, 0.5f, 0.5f, 1f));
+                  }
+                  catch (System.Exception e) { Debug.LogError($"Ошибка при создании правой панели: {e.Message}"); }
+
+                  Debug.Log("Все демонстрационные панели созданы");
+            }
+
+            /// <summary>
+            /// Создает стену на основе данных от OpenCV
+            /// </summary>
+            private GameObject CreateWallFromOpenCVData(Vector3 position, Vector3 normal, Vector2 size, float confidence)
+            {
+                  Debug.Log($"Создание стены из OpenCV данных: позиция {position}, нормаль {normal}, размер {size}, уверенность {confidence}");
+
+                  // Создаем игровой объект для стены
+                  GameObject wallObject = new GameObject($"OpenCVWall_{System.Guid.NewGuid().ToString().Substring(0, 8)}");
+                  wallObject.transform.position = position;
+
+                  // Устанавливаем правильную ориентацию стены на основе нормали
+                  // Нормаль указывает направление "от стены"
+                  Vector3 forward = -normal;
+                  Vector3 up = Vector3.up;
+
+                  // Если нормаль почти вертикальна, нужно скорректировать up-вектор
+                  if (Mathf.Abs(Vector3.Dot(normal, Vector3.up)) > 0.9f)
+                  {
+                        // Если нормаль почти параллельна up, используем другой вектор как up
+                        up = Vector3.forward;
+                  }
+
+                  // Рассчитываем правильное направление forward, чтобы up был перпендикулярен ему
+                  forward = Vector3.ProjectOnPlane(forward, up).normalized;
+
+                  // Устанавливаем ориентацию
+                  wallObject.transform.rotation = Quaternion.LookRotation(forward, up);
+
+                  // Добавляем компоненты для визуализации и взаимодействия
+                  MeshFilter meshFilter = wallObject.AddComponent<MeshFilter>();
+                  MeshRenderer meshRenderer = wallObject.AddComponent<MeshRenderer>();
+                  MeshCollider meshCollider = wallObject.AddComponent<MeshCollider>();
+
+                  // Создаем меш для стены
+                  Mesh mesh = CreateRectangularMesh(size.x, size.y);
+                  meshFilter.mesh = mesh;
+                  meshCollider.sharedMesh = mesh;
+
+                  // Создаем материал для стены - яркий красный для видимости
+                  Material wallMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                  wallMaterial.color = new Color(1.0f, 0.0f, 0.0f, 0.8f);
+
+                  // Включаем эмиссию для лучшей видимости
+                  if (wallMaterial.HasProperty("_EmissionColor"))
+                  {
+                        wallMaterial.EnableKeyword("_EMISSION");
+                        wallMaterial.SetColor("_EmissionColor", new Color(1.0f, 0.3f, 0.3f, 1.0f));
+                  }
+
+                  // Применяем материал
+                  meshRenderer.material = wallMaterial;
+
+                  // Настройки рендеринга
+                  meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                  meshRenderer.receiveShadows = false;
+
+                  // Добавляем компонент идентификатора стены
+                  WallIdentifier identifier = wallObject.AddComponent<WallIdentifier>();
+
+                  Debug.Log($"Создана стена из OpenCV данных на позиции {position}");
+
+                  return wallObject;
+            }
+
+            /// <summary>
+            /// Компонент для идентификации стены
+            /// </summary>
+            public class WallIdentifier : MonoBehaviour
+            {
+                  public OpenCVWallData wallData;
+                  public bool isBeingPainted = false;
+
+                  public void SetWallData(OpenCVWallData data)
+                  {
+                        wallData = data;
+                  }
+            }
+
+            /// <summary>
+            /// Создает прямоугольный меш с заданными размерами
+            /// </summary>
+            private Mesh CreateRectangularMesh(float width, float height)
+            {
+                  Mesh mesh = new Mesh();
+
+                  // Используем минимальные значения для размеров
+                  width = Mathf.Max(width, 0.1f);  // Минимум 10 см
+                  height = Mathf.Max(height, 0.1f); // Минимум 10 см
+
+                  float halfWidth = width / 2;
+                  float halfHeight = height / 2;
+
+                  // Вершины прямоугольника (плоскость)
+                  Vector3[] vertices = new Vector3[4]
+                  {
+                        new Vector3(-halfWidth, -halfHeight, 0),
+                        new Vector3(halfWidth, -halfHeight, 0),
+                        new Vector3(halfWidth, halfHeight, 0),
+                        new Vector3(-halfWidth, halfHeight, 0)
+                  };
+
+                  // Треугольники (два для прямоугольника)
+                  int[] triangles = new int[6]
+                  {
+                        0, 1, 2,
+                        0, 2, 3
+                  };
+
+                  // UV-координаты для текстурирования
+                  Vector2[] uv = new Vector2[4]
+                  {
+                        new Vector2(0, 0),
+                        new Vector2(1, 0),
+                        new Vector2(1, 1),
+                        new Vector2(0, 1)
+                  };
+
+                  // Нормали (все смотрят вперед)
+                  Vector3[] normals = new Vector3[4]
+                  {
+                        Vector3.forward,
+                        Vector3.forward,
+                        Vector3.forward,
+                        Vector3.forward
+                  };
+
+                  // Назначаем данные мешу
+                  mesh.vertices = vertices;
+                  mesh.triangles = triangles;
+                  mesh.uv = uv;
+                  mesh.normals = normals;
+
+                  return mesh;
+            }
+
+            /// <summary>
+            /// Проверяет, запущено ли приложение в режиме редактора или тестовом режиме
+            /// </summary>
+            private bool IsEditorOrTestMode()
+            {
+                  // Проверка на режим редактора
+                  if (Application.isEditor)
+                  {
+                        return true;
+                  }
+
+                  // Проверка наличия AR Foundation подсистем
+                  if (planeManager == null || planeManager.subsystem == null)
+                  {
+                        return true;
+                  }
+
+                  // Проверка на доступность ARSession
+                  ARSession arSession = FindFirstObjectByType<ARSession>();
+                  if (arSession == null || !arSession.enabled)
+                  {
+                        return true;
+                  }
+
+                  // Проверка состояния трекинга AR камеры
+                  ARCameraManager cameraManager = FindFirstObjectByType<ARCameraManager>();
+                  if (cameraManager == null || !cameraManager.enabled)
+                  {
+                        return true;
+                  }
+
+                  // Если найдены активные плоскости, считаем что это не тестовый режим
+                  if (planeManager.trackables.count > 0)
+                  {
+                        return false;
+                  }
+
+                  // По умолчанию считаем тестовым режимом, если не определились иначе
+                  return true;
+            }
+
+            /// <summary>
+            /// Корутина для постоянной проверки и активации плоскостей
+            /// </summary>
+            private System.Collections.IEnumerator EnsurePlanesVisibilityCoroutine()
+            {
+                  // Ждем немного для инициализации AR
+                  yield return new WaitForSeconds(1f);
+
+                  int batchCounter = 0;
+                  List<ARPlane> planesList = new List<ARPlane>();
+
+                  while (true)
+                  {
+                        // Проверяем все плоскости и активируем их
+                        if (planeManager != null && planeManager.enabled)
+                        {
+                              // Обновляем список плоскостей только раз в несколько циклов
+                              batchCounter++;
+                              if (batchCounter % 3 == 0 || planesList.Count == 0) // Чаще обновляем список
+                              {
+                                    planesList.Clear();
+                                    foreach (ARPlane plane in planeManager.trackables)
+                                    {
+                                          if (plane != null)
+                                          {
+                                                planesList.Add(plane);
+                                          }
+                                    }
+                                    batchCounter = 0;
+                                    Debug.Log($"Обновлен список плоскостей: найдено {planesList.Count} плоскостей");
+                              }
+
+                              int activatedCount = 0;
+                              int processedCount = 0;
+
+                              // Обрабатываем все плоскости в списке
+                              for (int i = 0; i < planesList.Count; i++)
+                              {
+                                    ARPlane plane = planesList[i];
+                                    if (plane == null) continue;
+
+                                    processedCount++;
+
+                                    try
+                                    {
+                                          // Принудительно активируем плоскость
+                                          if (!plane.gameObject.activeInHierarchy)
+                                          {
+                                                plane.gameObject.SetActive(true);
+                                                Debug.Log($"Принудительно активирована плоскость: {plane.trackableId}");
+
+                                                // Активируем всех родителей
+                                                Transform parent = plane.transform.parent;
+                                                while (parent != null)
+                                                {
+                                                      if (!parent.gameObject.activeInHierarchy)
+                                                      {
+                                                            parent.gameObject.SetActive(true);
+                                                            Debug.Log($"Активирован родитель плоскости: {parent.name}");
+                                                      }
+                                                      parent = parent.parent;
+                                                }
+
+                                                activatedCount++;
+                                          }
+
+                                          // Проверяем наличие кастомной визуализации
+                                          string visualName = $"CustomVisual_{plane.trackableId}";
+                                          Transform visualTrans = plane.transform.Find(visualName);
+
+                                          if (visualTrans == null)
+                                          {
+                                                // Удаляем старую визуализацию для гарантированного создания новой
+                                                RemoveCustomVisualization(plane);
+
+                                                // Создаем новую визуализацию
+                                                GameObject visual = CreateCustomPlaneVisualization(plane);
+                                                if (visual != null)
+                                                {
+                                                      Debug.Log($"Создана новая визуализация для плоскости: {plane.trackableId}");
+                                                      activatedCount++;
+                                                }
+                                          }
+                                          else if (!visualTrans.gameObject.activeInHierarchy)
+                                          {
+                                                visualTrans.gameObject.SetActive(true);
+                                                Debug.Log($"Активирована визуализация для плоскости: {plane.trackableId}");
+                                                activatedCount++;
+
+                                                // Проверяем компоненты визуализации
+                                                MeshRenderer renderer = visualTrans.GetComponent<MeshRenderer>();
+                                                if (renderer != null && !renderer.enabled)
+                                                {
+                                                      renderer.enabled = true;
+                                                      Debug.Log($"Включен рендерер визуализации: {plane.trackableId}");
+                                                }
+                                          }
+
+                                          // Проверяем и добавляем MeshCollider
+                                          EnsureMeshCollider(plane);
+                                    }
+                                    catch (System.Exception e)
+                                    {
+                                          Debug.LogError($"Ошибка при обработке плоскости {plane.trackableId}: {e.Message}");
+                                    }
+
+                                    // Небольшая пауза после каждой обработанной плоскости для стабильности
+                                    if (processedCount % 2 == 0) // После каждых 2 плоскостей
+                                    {
+                                          yield return null;
+                                    }
+                              }
+
+                              if (activatedCount > 0)
+                              {
+                                    Debug.Log($"В корутине активировано {activatedCount} элементов плоскостей из {planesList.Count}");
+                                    // Если что-то было активировано, обновляем все визуализации
+                                    UpdateAllVisualizations();
+                              }
+                        }
+
+                        // Пауза перед следующей проверкой - уменьшена для более частых проверок
+                        yield return new WaitForSeconds(0.5f);
+                  }
+            }
+
+            /// <summary>
+            /// Корутина для проверки видимости плоскостей после задержки
+            /// </summary>
+            private System.Collections.IEnumerator CheckPlanesVisibilityAfterDelay()
+            {
+                  // Ждем задержку перед проверкой видимости
+                  yield return new WaitForSeconds(1f);
+
+                  // Проверяем видимость всех плоскостей
+                  UpdateAllPlanesVisibility();
+            }
+
+            /// <summary>
+            /// Диагностический метод для проверки видимости плоскостей
+            /// </summary>
+            public void DebugAllPlanesVisibility()
+            {
+                  if (planeManager == null)
+                  {
+                        Debug.LogError("ДИАГНОСТИКА: AR Plane Manager не найден!");
+                        return;
+                  }
+
+                  int totalPlanes = planeManager.trackables.count;
+                  int activePlanes = 0;
+                  int inactivePlanes = 0;
+                  int planesWithVisualizations = 0;
+                  int planesWithActiveVisualizations = 0;
+                  int verticalPlanes = 0;
+                  int horizontalPlanes = 0;
+
+                  Debug.Log($"==== ДИАГНОСТИКА ВИДИМОСТИ ПЛОСКОСТЕЙ ====");
+                  Debug.Log($"Всего плоскостей: {totalPlanes}");
+
+                  foreach (ARPlane plane in planeManager.trackables)
+                  {
+                        if (plane == null)
+                        {
+                              Debug.LogWarning("Найдена null-плоскость в trackables!");
+                              continue;
+                        }
+
+                        // Проверяем активность плоскости
+                        if (plane.gameObject.activeSelf)
+                        {
+                              activePlanes++;
+                        }
+                        else
+                        {
+                              inactivePlanes++;
+                              Debug.LogWarning($"Неактивная плоскость: {plane.trackableId} на позиции {plane.transform.position}");
+                              // Активируем неактивные плоскости
+                              plane.gameObject.SetActive(true);
+                        }
+
+                        // Проверяем тип плоскости
+                        bool isVertical = IsVerticalPlane(plane);
+                        if (isVertical)
+                        {
+                              verticalPlanes++;
+                              Debug.Log($"Вертикальная плоскость (СТЕНА): {plane.trackableId} на позиции {plane.transform.position}");
+                        }
+                        else
+                        {
+                              horizontalPlanes++;
+                        }
+
+                        // Проверяем наличие визуализации
+                        string visualName = $"CustomVisual_{plane.trackableId}";
+                        Transform visualTrans = plane.transform.Find(visualName);
+                        if (visualTrans != null)
+                        {
+                              planesWithVisualizations++;
+
+                              if (visualTrans.gameObject.activeSelf)
+                              {
+                                    planesWithActiveVisualizations++;
+                              }
+                              else
+                              {
+                                    Debug.LogWarning($"Неактивная визуализация для плоскости: {plane.trackableId}");
+                                    // Активируем неактивные визуализации
+                                    visualTrans.gameObject.SetActive(true);
+                              }
+                        }
+                        else
+                        {
+                              Debug.LogWarning($"Отсутствует визуализация для плоскости: {plane.trackableId}");
+                              // Создаем визуализацию
+                              CreateCustomPlaneVisualization(plane);
+                        }
+                  }
+
+                  Debug.Log($"Активных плоскостей: {activePlanes} из {totalPlanes}");
+                  Debug.Log($"Неактивных плоскостей: {inactivePlanes} из {totalPlanes}");
+                  Debug.Log($"Плоскостей с визуализациями: {planesWithVisualizations} из {totalPlanes}");
+                  Debug.Log($"Плоскостей с активными визуализациями: {planesWithActiveVisualizations} из {totalPlanes}");
+                  Debug.Log($"Вертикальных плоскостей (СТЕН): {verticalPlanes} из {totalPlanes}");
+                  Debug.Log($"Горизонтальных плоскостей (ПОЛ): {horizontalPlanes} из {totalPlanes}");
+                  Debug.Log($"==== КОНЕЦ ДИАГНОСТИКИ ====");
+            }
+
+            /// <summary>
+            /// Повторное принудительное отображение всех плоскостей с задержкой
+            /// </summary>
+            private void DelayedForceShowAllPlanes()
+            {
+                  // Вызываем принудительное отображение плоскостей
+                  ForceShowAllPlanes();
+
+                  // Принудительно активируем все AR объекты снова
+                  EnsureARComponentsAreActive();
+
+                  // Запускаем повторную проверку с еще большей задержкой
+                  Invoke("SuperDelayedForceShowAllPlanes", 5.0f);
+            }
+
+            /// <summary>
+            /// Последняя попытка принудительного отображения плоскостей
+            /// </summary>
+            private void SuperDelayedForceShowAllPlanes()
+            {
+                  // Сбрасываем и активируем всё заново
+                  planeVisualizations.Clear();
+                  originalMaterials.Clear();
+
+                  // Активируем всё
+                  EnsureARComponentsAreActive();
+
+                  // Заставляем плоскости отобразиться
+                  ForceShowAllPlanes();
+
+                  // Принудительно обновляем визуализации
+                  UpdateAllVisualizations();
+
+                  // Выводим диагностику
+                  DebugAllPlanesVisibility();
+            }
+
+            /// <summary>
+            /// Обновляет все пользовательские визуализации плоскостей
+            /// </summary>
+            private void UpdateAllVisualizations()
+            {
+                  if (planeManager == null) return;
+
+                  foreach (ARPlane plane in planeManager.trackables)
+                  {
+                        if (plane != null && plane.gameObject != null && plane.gameObject.activeSelf)
+                        {
+                              UpdateCustomPlaneVisualization(plane);
+                        }
+                  }
+            }
+
+            /// <summary>
+            /// Обновляет существующую визуализацию плоскости
+            /// </summary>
+            private void UpdateCustomPlaneVisualization(ARPlane plane)
+            {
+                  if (plane == null) return;
+
+                  string visualName = $"CustomVisual_{plane.trackableId}";
+                  Transform visualTransform = plane.transform.Find(visualName);
+
+                  if (visualTransform != null)
+                  {
+                        GameObject visualObj = visualTransform.gameObject;
+                        if (!visualObj.activeSelf)
+                        {
+                              visualObj.SetActive(true);
+                        }
+
+                        // Обновляем меш, если он изменился
+                        MeshFilter planeMeshFilter = plane.GetComponent<MeshFilter>();
+                        MeshFilter visualMeshFilter = visualObj.GetComponent<MeshFilter>();
+
+                        if (planeMeshFilter != null && planeMeshFilter.mesh != null &&
+                            visualMeshFilter != null && planeMeshFilter.mesh != visualMeshFilter.mesh)
+                        {
+                              visualMeshFilter.mesh = planeMeshFilter.mesh;
+                              Debug.Log($"Обновлен меш для плоскости {plane.trackableId}");
+                        }
+
+                        // Обновляем материал на основе новой классификации
+                        MeshRenderer renderer = visualObj.GetComponent<MeshRenderer>();
+                        if (renderer != null)
+                        {
+                              bool isWall = IsVerticalPlane(plane);
+
+                              // Применяем соответствующий материал
+                              if (isWall)
+                              {
+                                    // Для стен используем яркий красный материал
+                                    renderer.material.color = new Color(1.0f, 0.0f, 0.0f, 1.0f);
+
+                                    if (renderer.material.HasProperty("_EmissionColor"))
+                                    {
+                                          renderer.material.EnableKeyword("_EMISSION");
+                                          renderer.material.SetColor("_EmissionColor", new Color(1.0f, 0.0f, 0.0f, 1.0f));
+                                    }
+                              }
+                              else
+                              {
+                                    // Для пола используем яркий зеленый материал
+                                    renderer.material.color = new Color(0.0f, 1.0f, 0.0f, 1.0f);
+
+                                    if (renderer.material.HasProperty("_EmissionColor"))
+                                    {
+                                          renderer.material.EnableKeyword("_EMISSION");
+                                          renderer.material.SetColor("_EmissionColor", new Color(0.0f, 1.0f, 0.0f, 1.0f));
+                                    }
+                              }
+                        }
+                  }
+                  else
+                  {
+                        // Если визуализация не существует, создаем новую
+                        CreateCustomPlaneVisualization(plane);
+                  }
+            }
+
+            /// <summary>
+            /// Удаляет пользовательскую визуализацию плоскости
+            /// </summary>
+            private void RemoveCustomVisualization(ARPlane plane)
+            {
+                  if (plane == null) return;
+
+                  // Находим и удаляем объект визуализации
+                  string visualName = $"CustomVisual_{plane.trackableId}";
+                  Transform visualTrans = plane.transform.Find(visualName);
+                  if (visualTrans != null)
+                  {
+                        GameObject.Destroy(visualTrans.gameObject);
+                        Debug.Log($"Удалена визуализация для плоскости: {plane.trackableId}");
+                  }
+            }
+
+            /// <summary>
+            /// Создает независимые визуализации для всех плоскостей
+            /// </summary>
+            private void CreateIndependentVisualizationsForAllPlanes()
+            {
+                  if (planeManager == null || !planeManager.enabled)
+                        return;
+
+                  int createdCount = 0;
+
+                  foreach (ARPlane plane in planeManager.trackables)
+                  {
+                        if (plane != null && plane.gameObject.activeSelf)
+                        {
+                              // Проверяем наличие визуализации
+                              string visualName = $"CustomVisual_{plane.trackableId}";
+                              Transform visualTrans = plane.transform.Find(visualName);
+
+                              if (visualTrans == null)
+                              {
+                                    // Создаем новую визуализацию
+                                    GameObject visual = CreateCustomPlaneVisualization(plane);
+                                    if (visual != null)
+                                    {
+                                          createdCount++;
+                                    }
+                              }
+                        }
+                  }
+
+                  if (createdCount > 0)
+                  {
+                        Debug.Log($"Создано {createdCount} независимых визуализаций");
+                  }
+            }
+
+            /// <summary>
+            /// Вспомогательный класс для хранения данных о стене от OpenCV
+            /// </summary>
+            [System.Serializable]
+            public class OpenCVWallData
+            {
+                  public Vector3 position;
+                  public Vector3 normal;
+                  public Vector2 size;
+                  public float confidence;
+                  public int wallId;
+
+                  public OpenCVWallData(Vector3 position, Vector3 normal, Vector2 size, float confidence, int wallId = -1)
+                  {
+                        this.position = position;
+                        this.normal = normal;
+                        this.size = size;
+                        this.confidence = confidence;
+                        this.wallId = wallId;
+                  }
+            }
+
+            /// <summary>
+            /// Обрабатывает данные о стенах, полученные от OpenCV
+            /// </summary>
+            public void ProcessOpenCVWalls(List<OpenCVWallData> walls)
+            {
+                  if (walls == null || walls.Count == 0)
+                  {
+                        Debug.LogWarning("Получен пустой список стен от OpenCV");
+                        return;
+                  }
+
+                  Debug.Log($"Обработка {walls.Count} стен от OpenCV");
+
+                  // Создаем стены на основе данных OpenCV
+                  foreach (var wallData in walls)
+                  {
+                        if (wallData.confidence > 0.6f) // Используем только стены с высокой уверенностью
+                        {
+                              GameObject wallObject = CreateWallFromOpenCVData(
+                                  wallData.position,
+                                  wallData.normal,
+                                  wallData.size,
+                                  wallData.confidence
+                              );
+
+                              // Добавляем дополнительные данные к стене
+                              WallIdentifier identifier = wallObject.GetComponent<WallIdentifier>();
+                              if (identifier != null)
+                              {
+                                    identifier.SetWallData(wallData);
+                              }
+                        }
+                  }
+            }
+
+            /// <summary>
+            /// Удаляет визуализацию плоскости (как кастомную, так и стандартную)
+            /// </summary>
+            private void RemovePlaneVisualization(ARPlane plane)
+            {
+                  if (plane == null) return;
+
+                  // Удаляем кастомную визуализацию
+                  RemoveCustomVisualization(plane);
+
+                  // Удаляем из словаря визуализаций
+                  if (planeVisualizations.ContainsKey(plane.trackableId))
+                  {
+                        planeVisualizations.Remove(plane.trackableId);
+                        Debug.Log($"Визуализация для плоскости {plane.trackableId} удалена из словаря");
+                  }
+            }
+
+            /// <summary>
+            /// Создает поверхность для рисования с указанными параметрами
+            /// </summary>
+            /// <param name="width">Ширина поверхности</param>
+            /// <param name="height">Высота поверхности</param>
+            /// <param name="position">Позиция в пространстве</param>
+            /// <param name="color">Цвет поверхности</param>
+            /// <returns>Созданный объект поверхности для рисования</returns>
+            public GameObject CreateDefaultPaintableSurface(float width, float height, Vector3 position, Color color)
+            {
+                  Debug.Log($"Создание стандартной поверхности для рисования: {position}, размер: {width}x{height}, цвет: {color}");
+
+                  // Создаем плоскость (quad) для рисования
+                  GameObject surface = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                  surface.name = $"PaintableSurface_{System.Guid.NewGuid().ToString().Substring(0, 8)}";
+
+                  // Устанавливаем размер и позицию
+                  surface.transform.position = position;
+                  surface.transform.localScale = new Vector3(width, height, 1f);
+
+                  // Ищем камеру, чтобы направить поверхность к пользователю
+                  Camera mainCamera = Camera.main;
+                  if (mainCamera == null)
+                        mainCamera = FindFirstObjectByType<Camera>();
+
+                  if (mainCamera != null)
+                  {
+                        // Поворачиваем поверхность к камере
+                        surface.transform.LookAt(mainCamera.transform);
+                        surface.transform.Rotate(new Vector3(0, 180, 0)); // Разворачиваем лицом к камере
+                  }
+
+                  // Настраиваем материал поверхности
+                  Renderer renderer = surface.GetComponent<Renderer>();
+                  if (renderer != null)
+                  {
+                        // Создаем материал с заданным цветом
+                        Material surfaceMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                        surfaceMaterial.color = color;
+
+                        // Настраиваем эмиссию для лучшей видимости
+                        if (surfaceMaterial.HasProperty("_EmissionColor"))
+                        {
+                              surfaceMaterial.EnableKeyword("_EMISSION");
+                              surfaceMaterial.SetColor("_EmissionColor", color * 0.7f);
+                        }
+
+                        renderer.material = surfaceMaterial;
+                        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                        renderer.receiveShadows = false;
+                  }
+
+                  // Добавляем коллайдер для взаимодействия
+                  if (!surface.TryGetComponent<MeshCollider>(out _))
+                  {
+                        surface.AddComponent<MeshCollider>();
+                  }
+
+                  // Добавляем компонент ARPlaneSimulation для совместимости с существующим кодом
+                  ARPlaneSimulation planeSimulation = surface.AddComponent<ARPlaneSimulation>();
+                  planeSimulation.isVertical = true;
+
+                  // Добавляем компонент PaintableSurface
+                  Remalux.AR.PaintableSurface paintable = surface.AddComponent<Remalux.AR.PaintableSurface>();
+                  // Устанавливаем цвет и размеры для PaintableSurface
+                  paintable.SetColor(color);
+                  paintable.SetSize(width, height);
+
+                  // Отправляем уведомление о созданной поверхности
+                  NotifyWallCreated(surface);
+
+                  Debug.Log($"Создана панель для рисования: {surface.name} на позиции {position}");
+                  return surface;
+            }
+
+            /// <summary>
+            /// Создает поверхность для рисования по умолчанию (упрощенная версия)
+            /// </summary>
+            private void CreateDefaultPaintableSurface(float width, float height)
+            {
+                  // Находим камеру
+                  Camera mainCamera = Camera.main;
+                  if (mainCamera == null)
+                        mainCamera = FindFirstObjectByType<Camera>();
+
+                  Vector3 position = Vector3.zero;
+                  if (mainCamera != null)
+                  {
+                        // Размещаем в 1.5 метрах перед камерой
+                        position = mainCamera.transform.position + mainCamera.transform.forward * 1.5f;
+                  }
+                  else
+                  {
+                        // Если камера не найдена, используем значение по умолчанию
+                        position = new Vector3(0, 1f, 2f);
+                  }
+
+                  // Создаем поверхность с желтым цветом по умолчанию
+                  CreateDefaultPaintableSurface(width, height, position, new Color(1f, 0.9f, 0.2f, 1f));
+            }
+
+            /// <summary>
+            /// Создает интерактивную панель для рисования на указанной точке экрана
+            /// </summary>
+            public GameObject CreatePaintableSurfaceAtScreenPoint(Vector2 screenPosition, float width = 2.0f, float height = 1.5f)
+            {
+                  Debug.Log($"Создание панели для рисования на точке экрана: {screenPosition}");
+
+                  // Ищем камеру
+                  Camera mainCamera = Camera.main;
+                  if (mainCamera == null)
+                  {
+                        mainCamera = FindFirstObjectByType<Camera>();
+                        if (mainCamera == null)
+                        {
+                              Debug.LogWarning("Не найдена камера для создания панели");
+                              return CreateDefaultPaintableSurface(width, height, new Vector3(0, 1f, 2f), new Color(1f, 0.9f, 0.2f, 1f));
+                        }
+                  }
+
+                  // Создаем луч из точки экрана
+                  Ray ray = mainCamera.ScreenPointToRay(screenPosition);
+                  RaycastHit hit;
+
+                  // Проверяем, попадаем ли мы в какой-либо коллайдер
+                  if (Physics.Raycast(ray, out hit, 20f))
+                  {
+                        // Создаем панель на точке попадания, слегка смещая вперед
+                        Vector3 position = hit.point + hit.normal * 0.01f; // слегка смещаем от поверхности
+                        Quaternion rotation = Quaternion.LookRotation(-hit.normal); // панель смотрит на нас
+
+                        // Задаем имя с учетом позиции
+                        string name = $"PaintableSurface_Screen_{screenPosition.x}_{screenPosition.y}";
+
+                        // Выбираем случайный цвет для разнообразия
+                        Color color = new Color(
+                            Random.Range(0.5f, 1f),
+                            Random.Range(0.5f, 1f),
+                            Random.Range(0.5f, 1f),
+                            1f
+                        );
+
+                        // Создаем поверхность с нужным поворотом
+                        GameObject surface = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                        surface.name = name;
+                        surface.transform.position = position;
+                        surface.transform.rotation = rotation;
+                        surface.transform.localScale = new Vector3(width, height, 1f);
+
+                        // Задаем материал поверхности
+                        Renderer renderer = surface.GetComponent<Renderer>();
+                        if (renderer != null)
+                        {
+                              Material surfaceMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                              surfaceMaterial.color = color;
+
+                              // Включаем эмиссию для лучшей видимости
+                              if (surfaceMaterial.HasProperty("_EmissionColor"))
+                              {
+                                    surfaceMaterial.EnableKeyword("_EMISSION");
+                                    surfaceMaterial.SetColor("_EmissionColor", color * 0.7f);
+                              }
+
+                              renderer.material = surfaceMaterial;
+                              renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                              renderer.receiveShadows = false;
+                        }
+
+                        // Добавляем коллайдер для взаимодействия
+                        if (!surface.TryGetComponent<MeshCollider>(out _))
+                        {
+                              surface.AddComponent<MeshCollider>();
+                        }
+
+                        // Добавляем компонент ARPlaneSimulation
+                        ARPlaneSimulation planeSimulation = surface.AddComponent<ARPlaneSimulation>();
+                        planeSimulation.isVertical = true;
+
+                        // Добавляем PaintableSurface компонент для рисования
+                        if (!surface.TryGetComponent<Remalux.AR.PaintableSurface>(out _))
+                        {
+                              var paintableSurface = surface.AddComponent<Remalux.AR.PaintableSurface>();
+                              paintableSurface.SetColor(color);
+                              paintableSurface.SetSize(width, height);
+                        }
+
+                        // Отправляем уведомление о созданной поверхности
+                        NotifyWallCreated(surface);
+
+                        Debug.Log($"Создана панель для рисования на точке экрана: {position}");
+                        return surface;
+                  }
+                  else
+                  {
+                        // Если луч никуда не попал, создаем панель перед камерой
+                        Vector3 position = mainCamera.transform.position + mainCamera.transform.forward * 2f;
+                        return CreateDefaultPaintableSurface(width, height, position, new Color(1f, 0.9f, 0.2f, 1f));
+                  }
+            }
+
+            // Helper methods for PaintableSurface - Updated to use Remalux.AR.PaintableSurface
+            private void SetSurfaceSize(Remalux.AR.PaintableSurface surface, float width, float height)
+            {
+                  // Simply scale the game object - it's a quad with proper scale
+                  if (surface != null)
+                  {
+                        surface.SetSize(width, height);
+                  }
+            }
+
+            private void SetSurfaceColor(Remalux.AR.PaintableSurface surface, Color color)
+            {
+                  // Get the renderer and set material color
+                  if (surface != null)
+                  {
+                        surface.SetColor(color);
+                  }
+            }
+
+            /// <summary>
+            /// Обрабатывает клик по экрану для создания поверхности для рисования
+            /// </summary>
+            public void HandleScreenTap(Vector2 screenPosition)
+            {
+                  // Проверяем, что клик не был по UI элементу
+                  if (!CanInteractWithPoint(screenPosition))
+                  {
+                        Debug.Log("Клик по UI элементу, игнорируем");
+                        return;
+                  }
+
+                  // Ищем плоскость под кликом с помощью ARRaycastManager
+                  ARRaycastManager raycastManager = ObjectFinder.FindFirstObject<ARRaycastManager>();
+                  if (raycastManager == null)
+                  {
+                        Debug.LogWarning("ARRaycastManager не найден, создаем стену по умолчанию");
+                        CreatePaintableSurfaceAtScreenPoint(screenPosition);
+                        return;
+                  }
+
+                  List<ARRaycastHit> hits = new List<ARRaycastHit>();
+
+                  // Выполняем raycast
+                  if (raycastManager.Raycast(screenPosition, hits, TrackableType.PlaneWithinPolygon | TrackableType.PlaneEstimated))
+                  {
+                        // Берем ближайшее попадание
+                        ARRaycastHit hitPose = hits[0];
+
+                        // Позиция и поворот для новой поверхности
+                        Vector3 position = hitPose.pose.position;
+                        Quaternion rotation = hitPose.pose.rotation;
+
+                        // Если это вертикальная плоскость (стена)
+                        if (planeManager != null)
+                        {
+                              ARPlane plane = planeManager.GetPlane(hitPose.trackableId);
+                              if (plane != null)
+                              {
+                                    // Проверяем, является ли это вертикальная плоскость (стена)
+                                    bool isVertical = IsVerticalPlane(plane);
+
+                                    // Если это стена, создаем панель с тем же размером, что и плоскость
+                                    if (isVertical)
+                                    {
+                                          // Поднимаем немного над поверхностью
+                                          position += plane.normal * 0.01f;
+
+                                          // Стена смотрит в сторону нормали плоскости
+                                          rotation = Quaternion.LookRotation(-plane.normal);
+
+                                          // Размеры панели соответствуют размерам плоскости, но не меньше минимального
+                                          float width = Mathf.Max(plane.size.x, 1.5f);
+                                          float height = Mathf.Max(plane.size.y, 2.0f);
+
+                                          // Создаем панель для рисования с заданным именем
+                                          string surfaceName = $"ARWall_{hitPose.trackableId}";
+                                          GameObject surface = CreateDefaultPaintableSurface(width, height, position,
+                                              new Color(0.9f, 0.9f, 1f, 1f), surfaceName);
+
+                                          // Применяем поворот
+                                          surface.transform.rotation = rotation;
+
+                                          // Показываем уведомление
+                                          ShowNotification("Создана поверхность для рисования на стене!", 2.0f);
+
+                                          return;
+                                    }
+                                    else
+                                    {
+                                          // Для пола создаем стену вертикально над точкой касания
+                                          position.y += 1.0f; // Поднимаем стену над полом
+
+                                          // Смотрит на нас
+                                          Camera mainCamera = Camera.main;
+                                          Vector3 dirToCamera = mainCamera != null ?
+                                              (mainCamera.transform.position - position).normalized : Vector3.forward;
+
+                                          // Сохраняем только горизонтальное направление для вертикального выравнивания стены
+                                          dirToCamera.y = 0;
+                                          rotation = Quaternion.LookRotation(dirToCamera);
+
+                                          // Создаем панель для рисования с заданным именем
+                                          string surfaceName = $"ARFloorWall_{hitPose.trackableId}";
+                                          GameObject surface = CreateDefaultPaintableSurface(2.0f, 1.5f, position,
+                                              new Color(1f, 0.9f, 0.2f, 1f), surfaceName);
+
+                                          // Применяем поворот
+                                          surface.transform.rotation = rotation;
+
+                                          // Показываем уведомление
+                                          ShowNotification("Создана поверхность для рисования над полом!", 2.0f);
+
+                                          return;
+                                    }
+                              }
+                        }
+
+                        // Если не нашли плоскость AR, просто создаем поверхность в точке касания
+                        CreatePaintableSurfaceAtScreenPoint(screenPosition);
+                  }
+                  else
+                  {
+                        // Если raycast не попал ни во что, создаем поверхность по умолчанию
+                        CreatePaintableSurfaceAtScreenPoint(screenPosition);
+                  }
+            }
+
+            /// <summary>
+            /// Creates a default paintable surface with specified dimensions, position, color, and name
+            /// </summary>
+            public GameObject CreateDefaultPaintableSurface(float width, float height, Vector3 position, Color color, string name)
+            {
+                  Debug.Log($"Creating paintable surface: {name} at position {position}, size: {width}x{height}, color: {color}");
+
+                  // Create a quad primitive for the surface
+                  GameObject surface = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                  surface.name = name;
+                  surface.transform.position = position;
+                  surface.transform.localScale = new Vector3(width, height, 1f);
+
+                  // The rotation will be set by the caller when needed
+                  // Removing automatic camera orientation since it interferes with explicit rotation
+
+                  // Configure the surface material
+                  Renderer renderer = surface.GetComponent<Renderer>();
+                  if (renderer != null)
+                  {
+                        // Create material with specified color
+                        Material surfaceMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                        surfaceMaterial.color = color;
+
+                        // Configure emission for better visibility
+                        if (surfaceMaterial.HasProperty("_EmissionColor"))
+                        {
+                              surfaceMaterial.EnableKeyword("_EMISSION");
+                              surfaceMaterial.SetColor("_EmissionColor", color * 0.7f);
+                        }
+
+                        renderer.material = surfaceMaterial;
+                        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                        renderer.receiveShadows = false;
+                  }
+
+                  // Add collider for interaction
+                  if (!surface.TryGetComponent<MeshCollider>(out _))
+                  {
+                        surface.AddComponent<MeshCollider>();
+                  }
+
+                  // Add ARPlaneSimulation component for compatibility with existing code
+                  ARPlaneSimulation planeSimulation = surface.AddComponent<ARPlaneSimulation>();
+                  planeSimulation.isVertical = true;
+
+                  // Add PaintableSurface component
+                  Remalux.AR.PaintableSurface paintable = surface.AddComponent<Remalux.AR.PaintableSurface>();
+                  // Set color and dimensions for PaintableSurface
+                  paintable.SetColor(color);
+                  paintable.SetSize(width, height);
+
+                  // Send notification about created surface
+                  NotifyWallCreated(surface);
+
+                  Debug.Log($"Created paintable surface: {surface.name} at position {position}");
+                  return surface;
+            }
+
+            /// <summary>
+            /// Creates a default paintable surface with specified dimensions, position, and color
+            /// </summary>
+            public GameObject CreateDefaultPaintableSurface(float width, float height, Vector3 position, Color color)
+            {
+                  // This version generates a random name and calls the 5-parameter version
+                  return CreateDefaultPaintableSurface(width, height, position, color, $"PaintableSurface_{System.Guid.NewGuid().ToString().Substring(0, 8)}");
+            }
+      }
+}

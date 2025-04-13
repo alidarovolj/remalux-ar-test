@@ -240,5 +240,46 @@ namespace Remalux.AR
                         panel.SetActive(true);
                   }
             }
+
+            /// <summary>
+            /// Создает панели для рисования на поверхностях
+            /// </summary>
+            public void CreatePaintableSurfaces()
+            {
+                  ARPlaneVisibilityController planeController = FindFirstObjectByType<ARPlaneVisibilityController>();
+                  if (planeController != null)
+                  {
+                        planeController.CreateDemoPaintableSurfaces();
+                        Debug.Log("Созданы панели для рисования");
+                  }
+                  else
+                  {
+                        Debug.LogError("Не найден ARPlaneVisibilityController!");
+                  }
+            }
+
+            /// <summary>
+            /// Создать панель для рисования в указанной точке экрана
+            /// </summary>
+            public void CreatePaintableSurfaceAtPoint(Vector2 screenPosition)
+            {
+                  ARPlaneVisibilityController planeController = FindFirstObjectByType<ARPlaneVisibilityController>();
+                  if (planeController != null)
+                  {
+                        GameObject panel = planeController.CreatePaintableSurfaceAtScreenPoint(screenPosition);
+                        if (panel != null)
+                        {
+                              Debug.Log($"Создана панель для рисования в точке {screenPosition}");
+                        }
+                        else
+                        {
+                              Debug.LogError("Не удалось создать панель для рисования!");
+                        }
+                  }
+                  else
+                  {
+                        Debug.LogError("Не найден ARPlaneVisibilityController!");
+                  }
+            }
       }
 }

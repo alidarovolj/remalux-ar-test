@@ -7,6 +7,7 @@ using OpenCVForUnity.ImgprocModule;
 using OpenCVForUnity.UnityUtils;
 using OpenCVForUnity.UtilsModule;
 using System.Linq;
+using System.Collections;
 
 namespace Remalux.AR
 {
@@ -19,6 +20,7 @@ namespace Remalux.AR
             [SerializeField] private ARCameraManager cameraManager;
             [SerializeField] private ARRaycastManager raycastManager;
             [SerializeField] private WallPainter wallPainter;
+            [SerializeField] private ARPlaneVisibilityController planeController;
 
             [Header("OpenCV Settings")]
             [SerializeField] private float minWallArea = 5000f; // Минимальная площадь стены в пикселях
@@ -27,6 +29,9 @@ namespace Remalux.AR
             [SerializeField] private int cannyThreshold1 = 50; // Нижний порог для алгоритма Canny
             [SerializeField] private int cannyThreshold2 = 150; // Верхний порог для алгоритма Canny
             [SerializeField] private bool drawDebug = true; // Отображать ли отладочную информацию на экране
+            [SerializeField] private float detectionInterval = 1.0f;
+            [SerializeField] private float minimumWallConfidence = 0.7f;
+            [SerializeField] private float minimumWallSize = 0.5f;
 
             [Header("Custom Wall")]
             [SerializeField] private GameObject wallPrefab; // Префаб для создания стены
@@ -35,6 +40,7 @@ namespace Remalux.AR
             [Header("Debug")]
             [SerializeField] private bool createTestWallOnStart = false;
             [SerializeField] private KeyCode testWallKey = KeyCode.T;
+            [SerializeField] private bool simulateWallDetection = true; // Флаг для симуляции обнаружения стен
 
             // Приватные переменные
             private List<ARRaycastHit> raycastHits = new List<ARRaycastHit>();
@@ -47,6 +53,7 @@ namespace Remalux.AR
             private List<MatOfPoint> contours;
             private bool isProcessingFrame = false;
             private Vector2[] lastDetectedWallCorners; // Углы последней обнаруженной стены в пикселях
+            private bool isProcessing = false;
 
             // Публичные свойства
             public bool IsWallDetected => currentDetectedWall != null;
@@ -72,6 +79,17 @@ namespace Remalux.AR
                   {
                         wallPainter = UnityEngine.Object.FindFirstObjectByType<WallPainter>();
                         Debug.Log($"[OpenCVWallDetector] Найден WallPainter: {(wallPainter != null)}");
+                  }
+
+                  if (planeController == null)
+                  {
+                        planeController = FindFirstObjectByType<ARPlaneVisibilityController>();
+                        if (planeController == null)
+                        {
+                              Debug.LogError("Не найден ARPlaneVisibilityController");
+                              enabled = false;
+                              return;
+                        }
                   }
 
                   // Инициализация OpenCV матриц
@@ -190,55 +208,51 @@ namespace Remalux.AR
             void ProcessImageWithOpenCV()
             {
                   if (cameraTexture == null)
+                  {
+                        Debug.LogWarning("[OpenCVWallDetector] cameraTexture is null");
                         return;
+                  }
 
                   try
                   {
-                        // Конвертируем текстуру в Mat
+                        // Преобразуем текстуру в Mat для OpenCV
                         Utils.texture2DToMat(cameraTexture, srcMat);
 
-                        // Добавим предварительную обработку для улучшения обнаружения
-                        // Уменьшаем шум с помощью GaussianBlur
-                        Mat blurredMat = new Mat();
-                        Imgproc.GaussianBlur(srcMat, blurredMat, new Size(5, 5), 0);
+                        // Преобразуем в оттенки серого для лучшего обнаружения контуров
+                        Imgproc.cvtColor(srcMat, grayMat, Imgproc.COLOR_RGBA2GRAY);
 
-                        // Преобразуем в оттенки серого
-                        Imgproc.cvtColor(blurredMat, grayMat, Imgproc.COLOR_RGBA2GRAY);
+                        // Применяем размытие для уменьшения шума
+                        Imgproc.GaussianBlur(grayMat, grayMat, new Size(5, 5), 0);
 
-                        // Можно усилить контраст, если нужно
-                        Core.normalize(grayMat, grayMat, 0, 255, Core.NORM_MINMAX);
-
-                        // Обнаружение краев с использованием Canny
+                        // Применяем алгоритм Canny для обнаружения краев
                         Imgproc.Canny(grayMat, cannyMat, cannyThreshold1, cannyThreshold2);
-
-                        // Применяем морфологическое закрытие для соединения близких краев
-                        Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
-                        Mat closedMat = new Mat();
-                        Imgproc.morphologyEx(cannyMat, closedMat, Imgproc.MORPH_CLOSE, kernel);
 
                         // Находим контуры
                         contours.Clear();
-                        Imgproc.findContours(closedMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+                        Imgproc.findContours(cannyMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
-                        Debug.Log($"[OpenCVWallDetector] Найдено контуров: {contours.Count}");
+                        Debug.Log($"[OpenCVWallDetector] Найдено {contours.Count} контуров");
 
-                        // Ищем самый подходящий контур для стены (прямоугольник)
-                        DetectWallFromContours();
-
-                        // Отображаем отладочную информацию
+                        // Отрисовываем контуры на изображении для отладки
                         if (drawDebug)
                         {
-                              DrawDebugOverlay();
+                              Imgproc.cvtColor(grayMat, srcMat, Imgproc.COLOR_GRAY2RGBA);
+                              for (int i = 0; i < contours.Count; i++)
+                              {
+                                    Imgproc.drawContours(srcMat, contours, i, new Scalar(255, 0, 0, 255), 2);
+                              }
+                              Utils.matToTexture2D(srcMat, cameraTexture);
                         }
 
-                        // Освобождаем временные ресурсы
-                        blurredMat.Dispose();
-                        closedMat.Dispose();
-                        kernel.Dispose();
+                        // Ищем потенциальные стены среди контуров
+                        DetectWallFromContours();
+
+                        // Преобразуем обнаруженные контуры в AR плоскости
+                        ConvertDetectedWallsToARPlaneFormat();
                   }
                   catch (System.Exception e)
                   {
-                        Debug.LogError($"[OpenCVWallDetector] Ошибка при обработке OpenCV: {e.Message}\n{e.StackTrace}");
+                        Debug.LogError($"[OpenCVWallDetector] Ошибка при обработке изображения: {e.Message}");
                   }
             }
 
@@ -640,17 +654,419 @@ namespace Remalux.AR
 
             void Start()
             {
-                  Debug.Log("[OpenCVWallDetector] Начало работы компонента");
+                  Debug.Log("[OpenCVWallDetector] Компонент запущен");
 
-                  // Если включен режим тестовой стены, создаем стену сразу после запуска
-                  if (createTestWallOnStart)
+                  if (planeController == null)
                   {
-                        Debug.Log("[OpenCVWallDetector] Создание тестовой стены при запуске");
-                        CreateTestWall();
+                        planeController = FindFirstObjectByType<ARPlaneVisibilityController>();
+                        Debug.Log($"[OpenCVWallDetector] Найден ARPlaneVisibilityController: {(planeController != null)}");
                   }
 
                   // Принудительно создаем тестовую стену через 3 секунды после запуска
-                  Invoke("CreateTestWall", 3.0f);
+                  if (createTestWallOnStart)
+                  {
+                        Invoke("CreateTestWall", 3.0f);
+                  }
+
+                  // Запускаем симуляцию обнаружения стен для быстрой демонстрации
+                  Invoke("SimulateInitialWallDetection", 2.0f);
+
+                  // Запускаем корутину для периодического обнаружения стен
+                  StartCoroutine(WallDetectionRoutine());
+
+                  Debug.Log("[OpenCVWallDetector] Двойной подход к обнаружению стен активирован: AR Foundation + OpenCV");
+            }
+
+            /// <summary>
+            /// Симулирует первоначальное обнаружение стен для быстрой демонстрации
+            /// </summary>
+            private void SimulateInitialWallDetection()
+            {
+                  // Используем симуляцию для быстрой демонстрации даже до реальной обработки видео
+                  if (planeController != null)
+                  {
+                        SimulateWallDetection();
+                        Debug.Log("Начальная симуляция стен завершена");
+                  }
+            }
+
+            private IEnumerator WallDetectionRoutine()
+            {
+                  yield return new WaitForSeconds(2f); // Ждем инициализацию AR
+
+                  while (true)
+                  {
+                        if (!isProcessing)
+                        {
+                              isProcessing = true;
+
+                              if (simulateWallDetection)
+                              {
+                                    // Симулируем обнаружение стен в Unity Editor для тестирования
+                                    SimulateWallDetection();
+                              }
+                              else
+                              {
+                                    // Получаем текущий кадр с камеры
+                                    if (cameraManager != null && cameraManager.TryAcquireLatestCpuImage(out var image))
+                                    {
+                                          Debug.Log("Получен кадр с камеры, размер: " + image.width + "x" + image.height);
+
+                                          // Здесь будет вызов OpenCV функций для обнаружения стен
+                                          // ProcessImageWithOpenCV(image);
+
+                                          image.Dispose();
+                                    }
+                              }
+
+                              isProcessing = false;
+                        }
+
+                        yield return new WaitForSeconds(detectionInterval);
+                  }
+            }
+
+            private void SimulateWallDetection()
+            {
+                  Debug.Log("Симуляция обнаружения стен с помощью OpenCV");
+
+                  List<ARPlaneVisibilityController.OpenCVWallData> simulatedWalls = new List<ARPlaneVisibilityController.OpenCVWallData>();
+
+                  // Получаем текущую позицию камеры
+                  Vector3 cameraPosition = Camera.main.transform.position;
+                  Vector3 cameraForward = Camera.main.transform.forward;
+                  Vector3 cameraRight = Camera.main.transform.right;
+                  Vector3 cameraUp = Camera.main.transform.up;
+
+                  // Проводим несколько рейкастов для обнаружения реальных поверхностей
+                  bool foundSurface = false;
+
+                  // Проверяем поверхности спереди от пользователя
+                  RaycastHit frontHit;
+                  if (Physics.Raycast(cameraPosition, cameraForward, out frontHit, 5.0f))
+                  {
+                        // Обнаружена поверхность впереди
+                        Vector3 wallPosition = frontHit.point;
+                        Vector3 wallNormal = frontHit.normal;
+
+                        // Определяем тип поверхности
+                        bool isVertical = Mathf.Abs(Vector3.Dot(wallNormal, Vector3.up)) < 0.3f;
+
+                        // Вычисляем приблизительный размер поверхности
+                        float width = isVertical ? 2.0f : 3.0f;
+                        float height = isVertical ? 2.0f : 2.0f;
+
+                        // Задаем уровень уверенности, который должен быть больше минимального порога
+                        float confidence = Mathf.Max(0.95f, minimumWallConfidence + 0.1f);
+
+                        ARPlaneVisibilityController.OpenCVWallData frontWall = new ARPlaneVisibilityController.OpenCVWallData(
+                            wallPosition,
+                            wallNormal,
+                            new Vector2(width, height),
+                            confidence,
+                            1
+                        );
+                        simulatedWalls.Add(frontWall);
+                        Debug.Log($"Обнаружена реальная поверхность спереди: позиция {wallPosition}, нормаль {wallNormal}");
+                        foundSurface = true;
+                  }
+
+                  // Проверяем поверхность справа от пользователя
+                  RaycastHit rightHit;
+                  if (Physics.Raycast(cameraPosition, cameraRight, out rightHit, 5.0f))
+                  {
+                        // Обнаружена поверхность справа
+                        Vector3 wallPosition = rightHit.point;
+                        Vector3 wallNormal = rightHit.normal;
+
+                        // Определяем тип поверхности
+                        bool isVertical = Mathf.Abs(Vector3.Dot(wallNormal, Vector3.up)) < 0.3f;
+
+                        // Вычисляем приблизительный размер поверхности
+                        float width = isVertical ? 2.0f : 3.0f;
+                        float height = isVertical ? 2.0f : 2.0f;
+
+                        // Задаем уровень уверенности, который должен быть больше минимального порога
+                        float confidence = Mathf.Max(0.9f, minimumWallConfidence + 0.05f);
+
+                        ARPlaneVisibilityController.OpenCVWallData rightWall = new ARPlaneVisibilityController.OpenCVWallData(
+                            wallPosition,
+                            wallNormal,
+                            new Vector2(width, height),
+                            confidence,
+                            2
+                        );
+                        simulatedWalls.Add(rightWall);
+                        Debug.Log($"Обнаружена реальная поверхность справа: позиция {wallPosition}, нормаль {wallNormal}");
+                        foundSurface = true;
+                  }
+
+                  // Проверяем поверхность слева от пользователя
+                  RaycastHit leftHit;
+                  if (Physics.Raycast(cameraPosition, -cameraRight, out leftHit, 5.0f))
+                  {
+                        // Обнаружена поверхность слева
+                        Vector3 wallPosition = leftHit.point;
+                        Vector3 wallNormal = leftHit.normal;
+
+                        // Определяем тип поверхности
+                        bool isVertical = Mathf.Abs(Vector3.Dot(wallNormal, Vector3.up)) < 0.3f;
+
+                        // Вычисляем приблизительный размер поверхности
+                        float width = isVertical ? 2.0f : 3.0f;
+                        float height = isVertical ? 2.0f : 2.0f;
+
+                        // Задаем уровень уверенности, который должен быть больше минимального порога
+                        float confidence = Mathf.Max(0.85f, minimumWallConfidence + 0.05f);
+
+                        ARPlaneVisibilityController.OpenCVWallData leftWall = new ARPlaneVisibilityController.OpenCVWallData(
+                            wallPosition,
+                            wallNormal,
+                            new Vector2(width, height),
+                            confidence,
+                            3
+                        );
+                        simulatedWalls.Add(leftWall);
+                        Debug.Log($"Обнаружена реальная поверхность слева: позиция {wallPosition}, нормаль {wallNormal}");
+                        foundSurface = true;
+                  }
+
+                  // Проверяем пол
+                  RaycastHit floorHit;
+                  if (Physics.Raycast(cameraPosition, -Vector3.up, out floorHit, 3.0f))
+                  {
+                        // Обнаружен пол
+                        Vector3 floorPosition = floorHit.point;
+                        Vector3 floorNormal = floorHit.normal;
+
+                        // Задаем уровень уверенности, который должен быть больше минимального порога
+                        float confidence = Mathf.Max(0.9f, minimumWallConfidence + 0.05f);
+
+                        ARPlaneVisibilityController.OpenCVWallData floor = new ARPlaneVisibilityController.OpenCVWallData(
+                            floorPosition,
+                            floorNormal,
+                            new Vector2(4.0f, 4.0f),
+                            confidence,
+                            4
+                        );
+                        simulatedWalls.Add(floor);
+                        Debug.Log($"Обнаружен пол: позиция {floorPosition}, нормаль {floorNormal}");
+                        foundSurface = true;
+                  }
+
+                  // Если не нашли ни одной реальной поверхности, создаем стены в относительных координатах
+                  if (!foundSurface)
+                  {
+                        Debug.Log("Не обнаружено реальных поверхностей, создаем стены относительно камеры");
+
+                        // Симулируем обнаружение стены прямо перед камерой
+                        Vector3 wallPosition = cameraPosition + cameraForward * 2.0f; // 2 метра перед камерой
+                        Vector3 wallNormal = -cameraForward; // Нормаль смотрит в сторону камеры
+
+                        // Задаем уровень уверенности
+                        float firstWallConfidence = Mathf.Max(0.9f, minimumWallConfidence + 0.1f);
+
+                        ARPlaneVisibilityController.OpenCVWallData frontWall = new ARPlaneVisibilityController.OpenCVWallData(
+                            wallPosition,
+                            wallNormal,
+                            new Vector2(2.0f, 2.0f),
+                            firstWallConfidence,
+                            1
+                        );
+                        simulatedWalls.Add(frontWall);
+
+                        // Симулируем обнаружение стены справа от камеры
+                        Vector3 rightWallPosition = cameraPosition + cameraRight * 2.0f + cameraForward * 1.0f;
+                        Vector3 rightWallNormal = -cameraRight;
+
+                        // Задаем уровень уверенности
+                        float secondWallConfidence = Mathf.Max(0.8f, minimumWallConfidence + 0.05f);
+
+                        ARPlaneVisibilityController.OpenCVWallData rightWall = new ARPlaneVisibilityController.OpenCVWallData(
+                            rightWallPosition,
+                            rightWallNormal,
+                            new Vector2(1.5f, 1.8f),
+                            secondWallConfidence,
+                            2
+                        );
+                        simulatedWalls.Add(rightWall);
+
+                        Debug.Log($"Созданы симулированные стены без привязки к реальным поверхностям");
+                  }
+
+                  // Отправляем данные в контроллер плоскостей
+                  if (simulatedWalls.Count > 0)
+                  {
+                        planeController.ProcessOpenCVWalls(simulatedWalls);
+                        Debug.Log($"Отправлено {simulatedWalls.Count} поверхностей в обработку");
+                  }
+            }
+
+            /// <summary>
+            /// Преобразует обнаруженные с помощью OpenCV контуры в формат данных для ARPlaneVisibilityController
+            /// </summary>
+            private void ConvertDetectedWallsToARPlaneFormat()
+            {
+                  if (contours == null || contours.Count == 0)
+                  {
+                        Debug.Log("Нет контуров для преобразования");
+                        return;
+                  }
+
+                  List<ARPlaneVisibilityController.OpenCVWallData> wallsData = new List<ARPlaneVisibilityController.OpenCVWallData>();
+
+                  for (int i = 0; i < contours.Count; i++)
+                  {
+                        MatOfPoint contour = contours[i];
+                        if (contour == null || contour.empty())
+                              continue;
+
+                        // Получаем площадь контура
+                        double area = Imgproc.contourArea(contour);
+
+                        // Проверяем, соответствует ли площадь нашим критериям
+                        if (area < minWallArea || area > maxWallArea)
+                              continue;
+
+                        // Аппроксимируем контур для получения более простой формы
+                        MatOfPoint2f contour2f = new MatOfPoint2f();
+                        contour.convertTo(contour2f, CvType.CV_32F);
+
+                        MatOfPoint2f approxCurve = new MatOfPoint2f();
+                        double epsilon = approxPolyEpsilon * Imgproc.arcLength(contour2f, true);
+                        Imgproc.approxPolyDP(contour2f, approxCurve, epsilon, true);
+
+                        // Преобразуем обратно в MatOfPoint
+                        MatOfPoint approxContour = new MatOfPoint();
+                        approxCurve.convertTo(approxContour, CvType.CV_32S);
+
+                        Point[] points = approxContour.toArray();
+
+                        // Нам нужны только контуры с 4 точками (примерно прямоугольные)
+                        if (points.Length == 4)
+                        {
+                              // Преобразуем точки экрана в мировые координаты
+                              Vector2[] screenCorners = new Vector2[4];
+                              for (int j = 0; j < 4; j++)
+                              {
+                                    screenCorners[j] = new Vector2((float)points[j].x, (float)points[j].y);
+                              }
+
+                              // Сортируем углы по часовой стрелке
+                              screenCorners = SortCornersClockwise(screenCorners);
+
+                              // Тут мы должны преобразовать экранные координаты в мировые
+                              List<Vector3> worldCorners = new List<Vector3>();
+                              bool allCornersValid = true;
+
+                              foreach (Vector2 screenPos in screenCorners)
+                              {
+                                    // Используем raycast для определения позиции в мире
+                                    if (raycastManager != null && raycastManager.Raycast(screenPos, raycastHits, TrackableType.PlaneWithinPolygon | TrackableType.PlaneEstimated))
+                                    {
+                                          if (raycastHits.Count > 0)
+                                          {
+                                                worldCorners.Add(raycastHits[0].pose.position);
+                                          }
+                                          else
+                                          {
+                                                allCornersValid = false;
+                                                break;
+                                          }
+                                    }
+                                    else
+                                    {
+                                          allCornersValid = false;
+                                          break;
+                                    }
+                              }
+
+                              if (allCornersValid && worldCorners.Count == 4)
+                              {
+                                    // Вычисляем центр стены
+                                    Vector3 center = (worldCorners[0] + worldCorners[1] + worldCorners[2] + worldCorners[3]) / 4f;
+
+                                    // Вычисляем нормаль (предполагаем, что стена плоская)
+                                    Vector3 edge1 = worldCorners[1] - worldCorners[0];
+                                    Vector3 edge2 = worldCorners[2] - worldCorners[1];
+                                    Vector3 normal = Vector3.Cross(edge1, edge2).normalized;
+
+                                    // Убеждаемся, что нормаль направлена в сторону камеры
+                                    Vector3 toCameraDir = (Camera.main.transform.position - center).normalized;
+                                    if (Vector3.Dot(normal, toCameraDir) < 0)
+                                    {
+                                          normal = -normal;
+                                    }
+
+                                    // Вычисляем размеры стены
+                                    float width = Vector3.Distance(worldCorners[0], worldCorners[1]);
+                                    float height = Vector3.Distance(worldCorners[1], worldCorners[2]);
+
+                                    // Создаем данные для стены
+                                    ARPlaneVisibilityController.OpenCVWallData wallData = new ARPlaneVisibilityController.OpenCVWallData(
+                                        center,
+                                        normal,
+                                        new Vector2(width, height),
+                                        CalculateWallConfidence(area, width, height),
+                                        i // используем индекс контура как ID стены
+                                    );
+
+                                    wallsData.Add(wallData);
+                                    Debug.Log($"Преобразован контур {i} в данные стены: позиция {center}, размер {width}x{height}");
+                              }
+                        }
+                  }
+
+                  // Если нашли стены, отправляем их в ARPlaneVisibilityController
+                  if (wallsData.Count > 0 && planeController != null)
+                  {
+                        // Фильтруем стены по уровню уверенности
+                        List<ARPlaneVisibilityController.OpenCVWallData> filteredWalls =
+                              wallsData.Where(w => w.confidence >= minimumWallConfidence).ToList();
+
+                        if (filteredWalls.Count > 0)
+                        {
+                              Debug.Log($"Отправляем {filteredWalls.Count} стен в ARPlaneVisibilityController (отфильтровано {wallsData.Count - filteredWalls.Count} с низкой уверенностью)");
+                              planeController.ProcessOpenCVWalls(filteredWalls);
+                        }
+                        else
+                        {
+                              Debug.Log($"Найдено {wallsData.Count} стен, но все они имеют уверенность ниже порога {minimumWallConfidence}");
+                        }
+                  }
+            }
+
+            /// <summary>
+            /// Рассчитывает уверенность в обнаружении стены на основе различных параметров
+            /// </summary>
+            private float CalculateWallConfidence(double area, float width, float height)
+            {
+                  // Проверяем соотношение сторон (хорошая стена должна быть примерно прямоугольной)
+                  float aspectRatio = width / height;
+                  float aspectConfidence = 1.0f;
+
+                  if (aspectRatio < 0.2f || aspectRatio > 5.0f)
+                  {
+                        aspectConfidence = 0.5f; // Странное соотношение сторон
+                  }
+
+                  // Проверяем размер (слишком маленькие или большие стены менее надежны)
+                  float sizeConfidence = Mathf.Clamp01(
+                        Mathf.Min(
+                              width / minimumWallSize,
+                              height / minimumWallSize,
+                              5.0f / width,
+                              5.0f / height
+                        )
+                  );
+
+                  // Проверяем площадь контура
+                  float areaConfidence = Mathf.Clamp01((float)((area - minWallArea) / (maxWallArea - minWallArea)));
+
+                  // Взвешиваем все факторы
+                  float confidence = (aspectConfidence * 0.3f) + (sizeConfidence * 0.4f) + (areaConfidence * 0.3f);
+
+                  return Mathf.Clamp01(confidence);
             }
       }
 }

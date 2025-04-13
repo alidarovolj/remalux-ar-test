@@ -53,6 +53,8 @@ namespace Remalux.AR
             private bool isInitialized = false;
             private bool isHighlighting = true;
             private WallPaintingUIManager uiManager;
+            private List<GameObject> _trackedWalls = new List<GameObject>();
+            private bool _autoSelectFirstWall = true;
 
             public float BrushSize
             {
@@ -386,37 +388,59 @@ namespace Remalux.AR
             }
 
             /// <summary>
-            /// Проверяет, является ли плоскость стеной (вертикальной поверхностью)
+            /// Проверяет, является ли объект поверхностью для рисования
+            /// </summary>
+            public bool IsWall(GameObject obj)
+            {
+                  if (obj == null)
+                        return false;
+
+                  // Проверяем наличие компонента ARPlane (стена от AR Foundation)
+                  ARPlane plane = obj.GetComponent<ARPlane>();
+                  if (plane != null)
+                  {
+                        return planeVisibilityController.IsVerticalPlane(plane);
+                  }
+
+                  // Проверяем наличие компонента PaintableSurface (наша кастомная поверхность)
+                  PaintableSurface paintableSurface = obj.GetComponent<PaintableSurface>();
+                  if (paintableSurface != null)
+                  {
+                        return true; // Все PaintableSurface по умолчанию подходят для рисования
+                  }
+
+                  // Проверяем наличие компонента WallIdentifier (стена от OpenCV)
+                  ARPlaneVisibilityController.WallIdentifier wallIdentifier = obj.GetComponent<ARPlaneVisibilityController.WallIdentifier>();
+                  if (wallIdentifier != null)
+                  {
+                        return true; // Все WallIdentifier представляют стены
+                  }
+
+                  // Стандартная проверка по имени объекта
+                  return obj.name.Contains("Wall") || obj.name.Contains("Стена") || obj.name.Contains("PaintableSurface");
+            }
+
+            /// <summary>
+            /// Проверяет, является ли ARPlane стеной (вертикальной поверхностью)
             /// </summary>
             private bool IsWall(ARPlane plane)
             {
                   if (plane == null)
                         return false;
 
-                  // Проверяем нормаль плоскости для определения вертикальности
-                  Vector3 normal = plane.normal;
-                  float dotWithUp = Vector3.Dot(normal, Vector3.up);
-
-                  // Если угол между нормалью и вектором вверх близок к 90 градусам (dotProduct близок к 0),
-                  // то это вертикальная плоскость (стена)
-                  return Mathf.Abs(dotWithUp) < 0.1f;
+                  return planeVisibilityController.IsVerticalPlane(plane);
             }
 
             /// <summary>
-            /// Настраивает обнаруженную стену из ARPlane
+            /// Настраивает стену из ARPlane
             /// </summary>
-            private void SetupWall(ARPlane plane)
+            public void SetupWall(ARPlane plane)
             {
-                  if (plane == null || plane.gameObject == null) return;
+                  if (plane == null || !IsWall(plane))
+                        return;
 
-                  // Добавляем в список вертикальных плоскостей
-                  if (!verticalPlanes.Contains(plane))
-                  {
-                        verticalPlanes.Add(plane);
-                  }
-
-                  // Настраиваем GameObject стены
-                  SetupWall(plane.gameObject);
+                  GameObject wallObj = plane.gameObject;
+                  SetupWall(wallObj);
             }
 
             /// <summary>
@@ -826,7 +850,7 @@ namespace Remalux.AR
             /// <summary>
             /// Устанавливает размер кисти
             /// </summary>
-            private void SetBrushSize(float size)
+            public void SetBrushSize(float size)
             {
                   brushSize = size;
             }
@@ -977,46 +1001,280 @@ namespace Remalux.AR
             }
 
             /// <summary>
-            /// Обрабатывает обнаруженную стену от OpenCVWallDetector
+            /// Обрабатывает стену, обнаруженную через ARPlaneVisibilityController
             /// </summary>
-            public void OnWallDetected(GameObject detectedWall)
+            public void OnWallDetected(GameObject wall)
             {
-                  if (detectedWall == null)
+                  Debug.Log($"WallPainter: Получена стена {wall.name} через сообщение");
+
+                  if (wall == null)
                         return;
 
-                  Debug.Log("Получена стена от OpenCV детектора");
+                  // Настраиваем стену для взаимодействия
+                  SetupWall(wall);
 
-                  // Сохраняем оригинальный материал
-                  Renderer renderer = detectedWall.GetComponent<Renderer>();
-                  if (renderer != null && !originalMaterials.ContainsKey(detectedWall))
+                  // Автоматически выделяем стену, чтобы пользователю было понятно, что её можно красить
+                  MeshRenderer renderer = wall.GetComponent<MeshRenderer>();
+                  if (renderer != null)
                   {
-                        originalMaterials[detectedWall] = renderer.material;
-
-                        // Если указан материал по умолчанию, применяем его
-                        if (defaultWallMaterial != null)
+                        // Сохраняем оригинальный материал, если еще не сохранен
+                        if (!originalMaterials.ContainsKey(wall))
                         {
-                              renderer.material = defaultWallMaterial;
+                              originalMaterials[wall] = renderer.material;
+                        }
+
+                        // Создаем материал для выделения
+                        Material highlightMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                        highlightMat.color = new Color(1.0f, 0.9f, 0.0f, 1.0f); // Яркий желтый
+
+                        // Включаем эмиссию для лучшей видимости
+                        if (highlightMat.HasProperty("_EmissionColor"))
+                        {
+                              highlightMat.EnableKeyword("_EMISSION");
+                              highlightMat.SetColor("_EmissionColor", new Color(1.0f, 0.9f, 0.0f, 1.0f));
+                              highlightMat.SetFloat("_EmissionIntensity", 1.5f);
+                        }
+
+                        // Применяем материал с эффектом выделения
+                        renderer.material = highlightMat;
+
+                        // Отключаем тени для улучшения видимости
+                        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                        renderer.receiveShadows = false;
+
+                        // Добавляем стену в список обрабатываемых
+                        ARPlane plane = wall.GetComponent<ARPlane>();
+                        if (plane != null && IsWall(plane) && !verticalPlanes.Contains(plane))
+                        {
+                              verticalPlanes.Add(plane);
+                              Debug.Log($"Добавлена новая стена в список вертикальных плоскостей: {plane.trackableId}");
+                        }
+
+                        Debug.Log($"Стена успешно настроена и выделена: {wall.name}");
+                  }
+                  else
+                  {
+                        Debug.LogWarning($"У стены {wall.name} отсутствует компонент MeshRenderer");
+                  }
+            }
+
+            /// <summary>
+            /// Обрабатывает создание демонстрационной стены из ARPlaneVisibilityController
+            /// </summary>
+            /// <param name="wall">GameObject стены</param>
+            public void OnDemoWallCreated(GameObject wall)
+            {
+                  if (wall == null)
+                  {
+                        Debug.LogError("OnDemoWallCreated: wall is null");
+                        return;
+                  }
+
+                  // Проверяем, что стена имеет компонент PaintableSurface
+                  var paintableSurface = wall.GetComponent<PaintableSurface>();
+                  if (paintableSurface == null)
+                  {
+                        Debug.LogWarning($"Wall {wall.name} doesn't have PaintableSurface component, adding it");
+                        paintableSurface = wall.AddComponent<PaintableSurface>();
+                  }
+
+                  // Проверяем наличие необходимых компонентов
+                  if (!wall.TryGetComponent<MeshRenderer>(out var renderer))
+                  {
+                        Debug.LogError($"Wall {wall.name} doesn't have MeshRenderer");
+                        return;
+                  }
+
+                  if (!wall.TryGetComponent<MeshCollider>(out var collider))
+                  {
+                        Debug.LogWarning($"Wall {wall.name} doesn't have MeshCollider, adding it");
+                        collider = wall.AddComponent<MeshCollider>();
+                  }
+
+                  // Добавляем стену в список доступных для рисования
+                  AddWallToTrackedWalls(wall);
+
+                  Debug.Log($"Demo wall {wall.name} added to tracked walls");
+            }
+
+            /// <summary>
+            /// Добавляет стену в список отслеживаемых стен
+            /// </summary>
+            private void AddWallToTrackedWalls(GameObject wall)
+            {
+                  if (wall == null || _trackedWalls.Contains(wall))
+                        return;
+
+                  _trackedWalls.Add(wall);
+
+                  // Если это первая стена и автоматический выбор включен, выбираем её
+                  if (_trackedWalls.Count == 1 && _autoSelectFirstWall)
+                  {
+                        SetCurrentWall(wall);
+                  }
+            }
+
+            /// <summary>
+            /// Устанавливает указанную стену как текущую для рисования
+            /// </summary>
+            private void SetCurrentWall(GameObject wall)
+            {
+                  if (wall == null)
+                        return;
+
+                  // Сбрасываем подсветку с предыдущей стены, если она была
+                  if (currentHighlightedWall != null)
+                  {
+                        RestoreWallMaterial(currentHighlightedWall);
+                  }
+
+                  // Устанавливаем новую текущую стену
+                  currentHighlightedWall = wall.GetComponent<ARPlane>();
+
+                  // Подсвечиваем новую выбранную стену
+                  HighlightWallMaterial(currentHighlightedWall);
+
+                  // Обновляем UI и другие компоненты, если необходимо
+                  UpdateUIForSelectedWall();
+            }
+
+            /// <summary>
+            /// Обновляет UI для выбранной стены
+            /// </summary>
+            private void UpdateUIForSelectedWall()
+            {
+                  // Логика обновления UI и других компонентов, если необходимо
+                  Debug.Log($"Выбрана стена: {(currentHighlightedWall != null ? currentHighlightedWall.trackableId : "нет")}");
+            }
+      }
+
+      // Add PaintableSurface class
+      /// <summary>
+      /// Компонент, указывающий, что объект может быть раскрашен
+      /// </summary>
+      [RequireComponent(typeof(MeshRenderer))]
+      [RequireComponent(typeof(MeshFilter))]
+      [RequireComponent(typeof(MeshCollider))]
+      public class PaintableSurface : MonoBehaviour
+      {
+            [Header("Свойства поверхности")]
+            [SerializeField] private Color _defaultColor = Color.white;
+            [SerializeField] private float _width = 1.0f;
+            [SerializeField] private float _height = 1.0f;
+
+            [Header("Настройки рисования")]
+            [SerializeField] private bool _canDrawOn = true;
+            [SerializeField] private float _brushScale = 1.0f;
+            [SerializeField] private Material _defaultMaterial;
+
+            /// <summary>
+            /// Можно ли рисовать на этой поверхности
+            /// </summary>
+            public bool CanDrawOn => _canDrawOn;
+
+            /// <summary>
+            /// Масштаб кисти для этой поверхности
+            /// </summary>
+            public float BrushScale => _brushScale;
+
+            /// <summary>
+            /// Цвет поверхности по умолчанию
+            /// </summary>
+            public Color DefaultColor => _defaultColor;
+
+            /// <summary>
+            /// Ширина поверхности
+            /// </summary>
+            public float Width => _width;
+
+            /// <summary>
+            /// Высота поверхности
+            /// </summary>  
+            public float Height => _height;
+
+            private void OnValidate()
+            {
+                  // Обновляем размеры и материал при изменении в инспекторе
+                  UpdateSizeAndMaterial();
+            }
+
+            private void Awake()
+            {
+                  // Убеждаемся, что у нас есть все необходимые компоненты
+                  if (GetComponent<MeshRenderer>() == null || GetComponent<MeshFilter>() == null || GetComponent<MeshCollider>() == null)
+                  {
+                        Debug.LogError($"На объекте {gameObject.name} отсутствует один из необходимых компонентов: MeshRenderer, MeshFilter или MeshCollider");
+                  }
+
+                  // Обновляем размеры и материал при создании
+                  UpdateSizeAndMaterial();
+            }
+
+            /// <summary>
+            /// Обновляет размеры и материал поверхности
+            /// </summary>
+            private void UpdateSizeAndMaterial()
+            {
+                  try
+                  {
+                        // Обновляем размеры меша, если он есть
+                        MeshFilter meshFilter = GetComponent<MeshFilter>();
+                        if (meshFilter != null && meshFilter.sharedMesh != null)
+                        {
+                              // Или если нужно, создаем новый меш
+                        }
+
+                        // Обновляем материал, если он есть
+                        MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
+                        if (meshRenderer != null)
+                        {
+                              if (_defaultMaterial != null)
+                              {
+                                    meshRenderer.material = _defaultMaterial;
+                              }
+                              else
+                              {
+                                    // Создаем простой материал
+                                    Material material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                                    material.color = _defaultColor;
+                                    meshRenderer.material = material;
+                              }
+                        }
+
+                        // Обновляем коллайдер
+                        MeshCollider meshCollider = GetComponent<MeshCollider>();
+                        if (meshCollider != null && meshFilter != null && meshFilter.sharedMesh != null)
+                        {
+                              meshCollider.sharedMesh = meshFilter.sharedMesh;
                         }
                   }
-
-                  // Добавляем в список стен, которые можно окрашивать
-                  if (!paintedWalls.ContainsKey(detectedWall))
+                  catch (System.Exception ex)
                   {
-                        paintedWalls[detectedWall] = null;
+                        Debug.LogError($"Ошибка при обновлении размеров и материала: {ex.Message}");
                   }
+            }
 
-                  // Можно добавить дополнительную логику для подготовки стены к покраске
-                  // Например, добавить коллайдер для взаимодействия
-                  MeshCollider collider = detectedWall.GetComponent<MeshCollider>();
-                  if (collider == null)
+            /// <summary>
+            /// Устанавливает новый цвет поверхности
+            /// </summary>
+            public void SetColor(Color newColor)
+            {
+                  _defaultColor = newColor;
+                  MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
+                  if (meshRenderer != null && meshRenderer.material != null)
                   {
-                        collider = detectedWall.AddComponent<MeshCollider>();
-                        MeshFilter meshFilter = detectedWall.GetComponent<MeshFilter>();
-                        if (meshFilter != null)
-                        {
-                              collider.sharedMesh = meshFilter.sharedMesh;
-                        }
+                        meshRenderer.material.color = newColor;
                   }
+            }
+
+            /// <summary>
+            /// Устанавливает новые размеры поверхности
+            /// </summary>
+            public void SetSize(float width, float height)
+            {
+                  _width = width;
+                  _height = height;
+                  UpdateSizeAndMaterial();
             }
       }
 }
