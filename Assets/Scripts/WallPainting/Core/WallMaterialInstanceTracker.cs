@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Remalux.AR
+namespace Remalux.WallPainting
 {
       public class WallMaterialInstanceTracker : MonoBehaviour
       {

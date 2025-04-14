@@ -1,7 +1,7 @@
 using UnityEngine;
 using System.Reflection;
 
-namespace Remalux.AR
+namespace Remalux.WallPainting
 {
       public class WallPainterRaycastVisualizer : MonoBehaviour
       {

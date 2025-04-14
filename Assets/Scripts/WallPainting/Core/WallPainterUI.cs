@@ -1,7 +1,8 @@
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
-namespace Remalux.AR
+namespace Remalux.WallPainting
 {
       [RequireComponent(typeof(WallPainter))]
       public class WallPainterUI : MonoBehaviour

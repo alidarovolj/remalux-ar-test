@@ -4,9 +4,16 @@ using OpenCVForUnity.CoreModule;
 using OpenCVForUnity.ImgprocModule;
 using OpenCVForUnity.UnityUtils;
 using OpenCVForUnity.UtilsModule;
+using System.Collections.Generic;
+using UnityEngine.XR.ARFoundation;
+using UnityEngine.XR.ARSubsystems;
+using Unity.Mathematics;
+using System.Linq;
+using Remalux.WallPainting.Vision;
 
-namespace Remalux.AR
+namespace Remalux.WallPainting
 {
+      [RequireComponent(typeof(ARPlaneManager))]
       public class WallPainter : MonoBehaviour
       {
             [Header("Основные настройки")]
@@ -39,21 +46,42 @@ namespace Remalux.AR
             private Mat contoursMat;
             private bool isInitialized = false;
 
+            [SerializeField] private Color paintColor = Color.white;
+
             private void Start()
             {
                   Initialize();
+                  SetupXRComponents();
+            }
+
+            private void SetupXRComponents()
+            {
+                  if (mainCamera == null)
+                  {
+                        mainCamera = Camera.main;
+                  }
+
+                  if (mainCamera != null)
+                  {
+                        // Ensure the camera is properly set up for AR
+                        var arCamera = mainCamera.GetComponent<ARCameraBackground>();
+                        if (arCamera == null)
+                        {
+                              arCamera = mainCamera.gameObject.AddComponent<ARCameraBackground>();
+                        }
+                  }
             }
 
             private void Initialize()
             {
-                  // Проверяем и инициализируем камеру
+                  if (isInitialized) return;
+
                   if (mainCamera == null)
                   {
                         mainCamera = Camera.main;
                         if (mainCamera == null)
                         {
-                              Debug.LogError("WallPainter: Не удалось найти камеру. Компонент будет отключен.");
-                              enabled = false;
+                              Debug.LogError("Main camera not found!");
                               return;
                         }
                   }
@@ -77,6 +105,7 @@ namespace Remalux.AR
                   }
 
                   InitializeWebCam();
+                  isInitialized = true;
             }
 
             private void InitializeWebCam()
@@ -87,7 +116,7 @@ namespace Remalux.AR
                         WebCamDevice[] devices = WebCamTexture.devices;
                         if (devices.Length == 0)
                         {
-                              Debug.LogError("WallPainter: Камеры не найдены");
+                              Debug.LogError("No webcam devices found!");
                               return;
                         }
 
@@ -125,19 +154,17 @@ namespace Remalux.AR
                         processedTexture = new Texture2D(webCamTexture.width, webCamTexture.height, TextureFormat.RGBA32, false);
 
                         Debug.Log($"WallPainter: Камера инициализирована. Разрешение: {webCamTexture.width}x{webCamTexture.height}, FPS: {webCamFPS}");
-                        isInitialized = true;
                   }
                   catch (Exception e)
                   {
-                        Debug.LogError($"WallPainter: Ошибка при инициализации камеры: {e.Message}");
+                        Debug.LogError($"Failed to initialize webcam: {e.Message}");
                         enabled = false;
                   }
             }
 
             private void Update()
             {
-                  if (!isInitialized)
-                        return;
+                  if (!isInitialized) return;
 
                   // Обновляем изображение с камеры
                   Utils.webCamTextureToMat(webCamTexture, rgbMat);
@@ -153,6 +180,8 @@ namespace Remalux.AR
 
             private void ProcessFrame()
             {
+                  if (webCamTexture == null || !webCamTexture.isPlaying) return;
+
                   try
                   {
                         // Конвертируем в оттенки серого
@@ -186,7 +215,7 @@ namespace Remalux.AR
                   }
                   catch (Exception e)
                   {
-                        Debug.LogError($"WallPainter: Ошибка при обработке кадра: {e.Message}");
+                        Debug.LogError($"Failed to process frame: {e.Message}");
                   }
             }
 
@@ -337,26 +366,26 @@ namespace Remalux.AR
             }
 
 #if UNITY_EDITOR
-        private void OnValidate()
-        {
-            // Проверяем камеру при изменении в инспекторе
-            if (mainCamera == null)
+            private void OnValidate()
             {
-                mainCamera = Camera.main;
-            }
+                  // Проверяем камеру при изменении в инспекторе
+                  if (mainCamera == null)
+                  {
+                        mainCamera = Camera.main;
+                  }
 
-            // Проверяем текущий материал
-            if (currentPaintMaterial == null && availableMaterials != null && availableMaterials.Length > 0)
-            {
-                currentPaintMaterial = availableMaterials[0];
-            }
+                  // Проверяем текущий материал
+                  if (currentPaintMaterial == null && availableMaterials != null && availableMaterials.Length > 0)
+                  {
+                        currentPaintMaterial = availableMaterials[0];
+                  }
 
-            // Проверяем маску слоя
-            if (wallLayerMask.value == 0)
-            {
-                wallLayerMask = 1 << 8; // Wall layer
+                  // Проверяем маску слоя
+                  if (wallLayerMask.value == 0)
+                  {
+                        wallLayerMask = 1 << 8; // Wall layer
+                  }
             }
-        }
 #endif
 
             public Material CurrentPaintMaterial
@@ -369,6 +398,15 @@ namespace Remalux.AR
                   if (material == null) return;
                   currentPaintMaterial = material;
                   Debug.Log($"Установлен новый материал для покраски: {material.name}");
+            }
+
+            public void SetPaintColor(Color color)
+            {
+                  paintColor = color;
+                  if (currentPaintMaterial != null)
+                  {
+                        currentPaintMaterial.color = color;
+                  }
             }
       }
 }

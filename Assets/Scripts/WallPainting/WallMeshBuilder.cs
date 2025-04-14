@@ -2,6 +2,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using Remalux.WallPainting;
+using Remalux.WallPainting.Vision;
 
 namespace Remalux.WallPainting
 {

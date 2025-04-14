@@ -10,12 +10,18 @@ using System.Collections;
 using System.Diagnostics;
 using Debug = UnityEngine.Debug;
 using OpenCVRect = OpenCVForUnity.CoreModule.Rect;
+using UnityEngine.XR.ARFoundation;
+using System;
+using Random = UnityEngine.Random;  // Explicitly use UnityEngine.Random
+using UnityEngine.InputSystem;  // Add Input System package
+using UnityEngine.EventSystems;  // Добавляем для обработки кликов
 
 namespace Remalux.WallPainting.Vision
 {
       public class WallDetector : MonoBehaviour
       {
             public event System.Action<List<WallData>> OnWallsDetected;
+            public event System.Action<WallData> OnWallSelected; // Новое событие для выбора стены
 
             [Header("Camera Settings")]
             [SerializeField] private bool useWebcam = true;
@@ -25,29 +31,32 @@ namespace Remalux.WallPainting.Vision
 
             [Header("Detection Settings")]
             // These fields are intentionally marked as NonSerialized to suppress unused warnings
-            [System.NonSerialized][SerializeField] private float detectionInterval = 0.03f; // Увеличиваем частоту обнаружения
-            [System.NonSerialized][SerializeField] private float minWallHeight = 0.2f; // Дальнейшее снижение минимальной высоты
-            [System.NonSerialized][SerializeField] private float minWallWidth = 0.2f; // Дальнейшее снижение минимальной ширины
-            [SerializeField] private double cannyThreshold1 = 20; // Еще ниже порог для большей чувствительности
-            [SerializeField] private double cannyThreshold2 = 80; // Еще ниже верхний порог
-            [System.NonSerialized][SerializeField] private int houghThreshold = 20; // Еще ниже порог Hough
-            [System.NonSerialized][SerializeField] private double minLineLength = 30; // Еще меньше минимальная длина линии
-            [System.NonSerialized][SerializeField] private double maxLineGap = 30; // Увеличиваем разрыв между линиями
+            [System.NonSerialized] public float detectionInterval = 0.03f; // Увеличиваем частоту обнаружения
+            [System.NonSerialized] public float minWallHeight = 0.2f; // Дальнейшее снижение минимальной высоты
+            [System.NonSerialized] public float minWallWidth = 0.2f; // Дальнейшее снижение минимальной ширины
+            public double cannyThreshold1 = 20; // Еще ниже порог для большей чувствительности
+            public double cannyThreshold2 = 80; // Еще ниже верхний порог
+            [System.NonSerialized] public int houghThreshold = 20; // Еще ниже порог Hough
+            [System.NonSerialized] public double minLineLength = 30; // Еще меньше минимальная длина линии
+            [System.NonSerialized] public double maxLineGap = 30; // Увеличиваем разрыв между линиями
 
             [Header("Performance")]
-            [SerializeField] private bool useProcessingResolution = true;
-            [SerializeField] private Vector2Int processingResolution = new Vector2Int(640, 480); // Повышаем разрешение обработки
-            [System.NonSerialized][SerializeField] private bool showPerformanceStats = true;
-            [SerializeField] private float processingInterval = 0.05f; // Увеличиваем частоту обработки
-            [SerializeField] private bool useGPUAcceleration = true; // Оставляем GPU ускорение
+            public bool useProcessingResolution = true;
+            public Vector2Int processingResolution = new Vector2Int(640, 480); // Повышаем разрешение обработки
+            [System.NonSerialized] public bool showPerformanceStats = true;
+            public float processingInterval = 0.05f; // Увеличиваем частоту обработки
+            public bool useGPUAcceleration = true; // Оставляем GPU ускорение
 
             [Header("Debug")]
-            [SerializeField] private RawImage debugImageDisplay;
-            [SerializeField] private bool showDebugLines = true;
-            [SerializeField] private Color debugLineColor = Color.red;
+            public RawImage debugImageDisplay;
+            public bool showDebugLines = true;
+            public Color debugLineColor = Color.red;
 
             [Header("Components")]
             [SerializeField] public Camera mainCamera; // Публичная ссылка на основную камеру для преобразования координат
+
+            [Header("Painting")]
+            public Color defaultPaintColor = new Color(0.0f, 0.7f, 1.0f, 1.0f); // Цвет по умолчанию
 
             private bool isDetecting = false;
             private float lastDetectionTime;
@@ -104,6 +113,10 @@ namespace Remalux.WallPainting.Vision
             private bool isCameraInitialized = false;
             private int framesToSkip = 0;
 
+            // Список текущих стен и выбранная стена
+            private List<WallData> currentWalls = new List<WallData>();
+            private WallData selectedWall = null;
+
             private void Start()
             {
                   Debug.Log("WallDetector.Start()");
@@ -139,7 +152,15 @@ namespace Remalux.WallPainting.Vision
                   supportsComputeShaders = SystemInfo.supportsComputeShaders;
                   Debug.Log($"Поддержка Compute Shaders: {supportsComputeShaders}");
 
-                  debugImageDisplay.gameObject.SetActive(true);
+                  if (debugImageDisplay != null && debugImageDisplay.gameObject != null)
+                  {
+                        debugImageDisplay.gameObject.SetActive(true);
+                  }
+                  else
+                  {
+                        // Try to find or create a fallback debug display
+                        TryCreateDebugDisplay();
+                  }
 
                   StartCoroutine(InitializeCameraCoroutine());
 
@@ -370,9 +391,46 @@ namespace Remalux.WallPainting.Vision
             public void SetDebugImageDisplay(RawImage display)
             {
                   debugImageDisplay = display;
-                  if (webCamTexture != null && webCamTexture.isPlaying && debugImageDisplay != null)
+
+                  // Extra initialization of debug display when set
+                  if (debugImageDisplay != null && webCamTexture != null && webCamTexture.isPlaying)
                   {
                         debugImageDisplay.texture = webCamTexture;
+
+                        // Setup display orientation and position to fullscreen
+                        if (debugImageDisplay.rectTransform != null)
+                        {
+                              // Make the RawImage fit its parent completely
+                              debugImageDisplay.rectTransform.anchorMin = Vector2.zero;
+                              debugImageDisplay.rectTransform.anchorMax = Vector2.one;
+                              debugImageDisplay.rectTransform.sizeDelta = Vector2.zero;
+                              debugImageDisplay.rectTransform.anchoredPosition = Vector2.zero;
+
+                              // RawImage не имеет свойства preserveAspect
+                              // Вместо этого настроим соотношение сторон через rectTransform
+                              debugImageDisplay.uvRect = new UnityEngine.Rect(0, 0, 1, 1);
+
+                              // Also setup parent if available to fill screen
+                              Transform parent = debugImageDisplay.transform.parent;
+                              if (parent != null)
+                              {
+                                    RectTransform parentRect = parent.GetComponent<RectTransform>();
+                                    if (parentRect != null)
+                                    {
+                                          parentRect.anchorMin = Vector2.zero;
+                                          parentRect.anchorMax = Vector2.one;
+                                          parentRect.sizeDelta = Vector2.zero;
+                                          parentRect.anchoredPosition = Vector2.zero;
+                                    }
+                              }
+
+                              // Ensure the image is fully visible with no transparency
+                              debugImageDisplay.color = Color.white;
+                        }
+                  }
+                  else
+                  {
+                        Debug.Log("Debug display set, but will only be initialized when camera is running");
                   }
             }
 
@@ -423,6 +481,9 @@ namespace Remalux.WallPainting.Vision
                         return;
                   }
 
+                  // Добавляем проверку кликов на стены
+                  CheckWallClick();
+
                   // Обработка найденных 2D контуров и преобразование их в 3D стены
                   ProcessDetectedContoursMainThread();
 
@@ -436,8 +497,8 @@ namespace Remalux.WallPainting.Vision
                         }
                   }
 
-                  // Обработка ввода для переключения режимов отображения
-                  if (Input.GetKeyDown(KeyCode.D))
+                  // Replace Input.GetKeyDown with Input System
+                  if (Keyboard.current != null && Keyboard.current.dKey.wasPressedThisFrame)
                   {
                         showDebugLines = !showDebugLines;
                         Debug.Log($"Режим отладки: {(showDebugLines ? "включен" : "выключен")}");
@@ -509,6 +570,13 @@ namespace Remalux.WallPainting.Vision
             // Метод для обработки 2D данных (запускается в фоновом потоке)
             private void Process2DDataAsync()
             {
+                  // Объявляем все Mat объекты в начале метода
+                  Mat grayMat = null;
+                  Mat edgeMat = null;
+                  Mat binaryMat = null;
+                  Mat hierarchy = null;
+                  Mat kernel = null;
+
                   try
                   {
                         if (!newFrameReady || inputMat == null) return;
@@ -516,60 +584,58 @@ namespace Remalux.WallPainting.Vision
                         // Create a stopwatch to measure processing time
                         Stopwatch stopwatch = Stopwatch.StartNew();
 
-                        // Создаем копию исходного изображения для отображения результатов
-                        inputMat.copyTo(debugMat);
+                        lock (debugMatLock)
+                        {
+                              // Создаем копию исходного изображения для отображения результатов
+                              inputMat.copyTo(debugMat);
 
-                        // REMOVED: No orange overlay for scanning effect
+                              // Добавляем сетку для эффекта сканирования
+                              float currentTime = (float)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
+                              int gridSize = 40 + (int)(10 * Mathf.Sin(currentTime));
+                              DrawStaticScanningGrid(debugMat, gridSize);
 
-                        // Добавляем сетку для эффекта сканирования - используем системное время вместо Unity Time
-                        float currentTime = (float)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
-                        int gridSize = 40 + (int)(10 * Mathf.Sin(currentTime));
-                        DrawStaticScanningGrid(debugMat, gridSize);
+                              // Рисуем центральный прицел
+                              int centerX = debugMat.cols() / 2;
+                              int centerY = debugMat.rows() / 2;
+                              int crosshairSize = 30 + (int)(10 * Mathf.Sin(currentTime * 3));
+                              Imgproc.circle(debugMat, new Point(centerX, centerY), crosshairSize, new Scalar(0, 255, 255, 200), 2);
+                              Imgproc.line(debugMat, new Point(centerX - crosshairSize, centerY), new Point(centerX + crosshairSize, centerY), new Scalar(255, 255, 255, 220), 2);
+                              Imgproc.line(debugMat, new Point(centerX, centerY - crosshairSize), new Point(centerX, centerY + crosshairSize), new Scalar(255, 255, 255, 220), 2);
 
-                        // Рисуем центральный прицел
-                        int centerX = debugMat.cols() / 2;
-                        int centerY = debugMat.rows() / 2;
-                        int crosshairSize = 30 + (int)(10 * Mathf.Sin(currentTime * 3)); // Пульсирующий размер с системным временем
-                        Imgproc.circle(debugMat, new Point(centerX, centerY), crosshairSize, new Scalar(0, 255, 255, 200), 2);
-                        Imgproc.line(debugMat, new Point(centerX - crosshairSize, centerY), new Point(centerX + crosshairSize, centerY), new Scalar(255, 255, 255, 220), 2);
-                        Imgproc.line(debugMat, new Point(centerX, centerY - crosshairSize), new Point(centerX, centerY + crosshairSize), new Scalar(255, 255, 255, 220), 2);
+                              // Добавляем текст с инструкцией
+                              Imgproc.putText(
+                                  debugMat,
+                                  "СКАНИРОВАНИЕ ПОВЕРХНОСТЕЙ...",
+                                  new Point(centerX - 150, 30),
+                                  Imgproc.FONT_HERSHEY_DUPLEX,
+                                  0.7,
+                                  new Scalar(255, 255, 0),
+                                  1
+                              );
+                        }
 
-                        // Добавляем текст с инструкцией
-                        Imgproc.putText(
-                            debugMat,
-                            "СКАНИРОВАНИЕ ПОВЕРХНОСТЕЙ...",
-                            new Point(centerX - 150, 30),
-                            Imgproc.FONT_HERSHEY_DUPLEX,
-                            0.7,
-                            new Scalar(255, 255, 0), // Яркий желтый
-                            1
-                        );
-
-                        // Обрабатываем найденные контуры
                         List<WallContourData> wallContours = new List<WallContourData>();
-                        int wallCount = 0; // Счетчик обнаруженных стен для нумерации
+                        int wallCount = 0;
 
                         // Create a grayscale image for contour detection
-                        Mat grayMat = new Mat();
+                        grayMat = new Mat();
                         Imgproc.cvtColor(inputMat, grayMat, Imgproc.COLOR_RGBA2GRAY);
 
                         // Apply Gaussian blur to reduce noise
                         Imgproc.GaussianBlur(grayMat, grayMat, new Size(5, 5), 0);
 
                         // Apply Canny edge detection
-                        Mat edgeMat = new Mat();
+                        edgeMat = new Mat();
                         Imgproc.Canny(grayMat, edgeMat, cannyThreshold1, cannyThreshold2);
 
                         // Apply morphological operations to close gaps
-                        Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
+                        kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
                         Imgproc.morphologyEx(edgeMat, edgeMat, Imgproc.MORPH_CLOSE, kernel);
 
-                        // Important: Make sure we have a proper binary image for contour detection
-                        // Threshold the image to ensure it's binary (0 or 255)
-                        Mat binaryMat = new Mat();
+                        // Ensure binary image
+                        binaryMat = new Mat();
                         Imgproc.threshold(edgeMat, binaryMat, 1, 255, Imgproc.THRESH_BINARY);
 
-                        // Ensure we have an 8-bit single channel matrix
                         if (binaryMat.channels() > 1)
                         {
                               Mat tmp = new Mat();
@@ -578,124 +644,159 @@ namespace Remalux.WallPainting.Vision
                               binaryMat = tmp;
                         }
 
-                        // Находим контуры - это будут потенциальные стены
+                        // Find contours
                         List<MatOfPoint> contours = new List<MatOfPoint>();
-                        Mat hierarchy = new Mat();
-                        // Use the PROPERLY prepared binary matrix for contour detection
+                        hierarchy = new Mat();
                         Imgproc.findContours(binaryMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
-                        // Draw edges on debug image for visualization
-                        Imgproc.cvtColor(binaryMat, edgeMat, Imgproc.COLOR_GRAY2RGBA);
-                        OpenCVForUnity.CoreModule.Core.addWeighted(debugMat, 0.7, edgeMat, 0.3, 0, debugMat);
-
-                        // Проходим по всем обработанным контурам и рисуем на них информацию
-                        for (int i = 0; i < contours.Count; i++)
+                        lock (debugMatLock)
                         {
-                              MatOfPoint contour = contours[i];
-                              double area = Imgproc.contourArea(contour);
-                              if (area < 200) continue; // Еще меньше минимальная площадь
+                              // Draw edges on debug image
+                              Imgproc.cvtColor(binaryMat, edgeMat, Imgproc.COLOR_GRAY2RGBA);
+                              OpenCVForUnity.CoreModule.Core.addWeighted(debugMat, 0.7, edgeMat, 0.3, 0, debugMat);
 
-                              // Аппроксимируем контур многоугольником для получения более прямых линий
-                              MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
-                              MatOfPoint2f approxCurve = new MatOfPoint2f();
-                              double epsilon = 0.04 * Imgproc.arcLength(contour2f, true);
-                              Imgproc.approxPolyDP(contour2f, approxCurve, epsilon, true);
+                              // Draw contours
+                              Imgproc.drawContours(debugMat, contours, -1, new Scalar(0, 255, 0, 255), 2);
+                        }
 
-                              // Преобразуем обратно в MatOfPoint
-                              MatOfPoint approxContour = new MatOfPoint(approxCurve.toArray());
-
-                              // Получаем ограничивающий прямоугольник контура
-                              OpenCVRect boundRect = Imgproc.boundingRect(approxContour);
-
-                              // Принимаем практически любой контур подходящего размера
-                              float aspectRatio = (float)boundRect.width / boundRect.height;
-                              bool isValidSurface = aspectRatio > 0.1 && aspectRatio < 10.0; // Еще более широкий диапазон
-
-                              // Дополнительная проверка - должен быть достаточно большим
-                              bool isBigEnough = boundRect.width > 30 && boundRect.height > 30;
-
-                              // Если контур достаточно большой и имеет подходящие пропорции, добавляем его
-                              if (isValidSurface && isBigEnough)
+                        // Process contours
+                        foreach (var contour in contours)
+                        {
+                              try
                               {
-                                    // Вычисляем центр и ориентацию
-                                    Vector2 center = new Vector2(
-                                          boundRect.x + boundRect.width / 2f,
-                                          boundRect.y + boundRect.height / 2f
-                                    );
+                                    double area = Imgproc.contourArea(contour);
+                                    if (area < 200) continue;
 
-                                    // Определяем ориентацию контура
-                                    RotatedRect rotatedRect = Imgproc.minAreaRect(new MatOfPoint2f(approxContour.toArray()));
-                                    float angle = (float)rotatedRect.angle;
+                                    MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
+                                    MatOfPoint2f approxCurve = new MatOfPoint2f();
 
-                                    // Сохраняем только 2D данные для последующей обработки в основном потоке
-                                    WallContourData wallContour = new WallContourData
+                                    try
                                     {
-                                          boundRect = boundRect,
-                                          angle = angle,
-                                          center = center,
-                                          aspectRatio = aspectRatio
-                                    };
+                                          double epsilon = 0.04 * Imgproc.arcLength(contour2f, true);
+                                          Imgproc.approxPolyDP(contour2f, approxCurve, epsilon, true);
 
-                                    wallContours.Add(wallContour);
-                                    wallCount++;
+                                          MatOfPoint approxContour = new MatOfPoint(approxCurve.toArray());
+                                          OpenCVRect boundRect = Imgproc.boundingRect(approxContour);
 
-                                    // Рисуем контур на изображении
-                                    Imgproc.drawContours(debugMat, new List<MatOfPoint> { approxContour }, 0, new Scalar(0, 255, 255, 255), 2);
+                                          float aspectRatio = (float)boundRect.width / boundRect.height;
+                                          bool isValidSurface = aspectRatio > 0.1 && aspectRatio < 10.0;
+                                          bool isTooSmall = boundRect.width < 30 || boundRect.height < 30;
+
+                                          if (isValidSurface && !isTooSmall)
+                                          {
+                                                Vector2 center = new Vector2(
+                                                      boundRect.x + boundRect.width / 2f,
+                                                      boundRect.y + boundRect.height / 2f
+                                                );
+
+                                                RotatedRect rotatedRect = Imgproc.minAreaRect(new MatOfPoint2f(approxContour.toArray()));
+                                                float angle = (float)rotatedRect.angle;
+
+                                                wallContours.Add(new WallContourData
+                                                {
+                                                      boundRect = boundRect,
+                                                      angle = angle,
+                                                      center = center,
+                                                      aspectRatio = aspectRatio
+                                                });
+                                                wallCount++;
+
+                                                lock (debugMatLock)
+                                                {
+                                                      Imgproc.drawContours(debugMat, new List<MatOfPoint> { approxContour }, 0, new Scalar(0, 255, 255, 255), 2);
+                                                }
+                                          }
+
+                                          approxContour.release();
+                                    }
+                                    finally
+                                    {
+                                          contour2f.release();
+                                          approxCurve.release();
+                                    }
+                              }
+                              finally
+                              {
+                                    contour.release();
                               }
                         }
 
-                        // Рисуем обнаруженные контуры на изображении для визуализации
-                        Imgproc.drawContours(debugMat, contours, -1, new Scalar(0, 255, 0, 255), 2);
-
-                        // Проходим по всем обработанным контурам и рисуем на них информацию
-                        for (int i = 0; i < wallContours.Count; i++)
+                        lock (debugMatLock)
                         {
-                              WallContourData wallContour = wallContours[i];
-                              OpenCVRect rect = wallContour.boundRect;
+                              // Draw wall information
+                              for (int i = 0; i < wallContours.Count; i++)
+                              {
+                                    WallContourData wallContour = wallContours[i];
+                                    OpenCVRect rect = wallContour.boundRect;
 
-                              // Рисуем прямоугольник вокруг контура
+                                    // Draw a more prominent filled rectangle with transparency
+                                    Mat overlay = new Mat(debugMat.size(), debugMat.type(), new Scalar(0, 0, 0, 0));
+                                    Imgproc.rectangle(
+                                        overlay,
+                                        new Point(rect.x, rect.y),
+                                        new Point(rect.x + rect.width, rect.y + rect.height),
+                                        new Scalar(0, 120, 0, 100),  // Менее яркий полупрозрачный зеленый
+                                        -1  // Filled rectangle
+                                    );
+
+                                    // Add the overlay to the debug image
+                                    OpenCVForUnity.CoreModule.Core.addWeighted(debugMat, 1.0, overlay, 0.3, 0, debugMat);  // Уменьшаем непрозрачность
+                                    overlay.release();
+
+                                    // Draw prominent border - делаем более тонким и менее ярким
+                                    Imgproc.rectangle(
+                                        debugMat,
+                                        new Point(rect.x, rect.y),
+                                        new Point(rect.x + rect.width, rect.y + rect.height),
+                                        new Scalar(0, 180, 0, 200),  // Не такой яркий зеленый
+                                        1  // Более тонкая линия
+                                    );
+
+                                    // Draw corners markers for additional visibility - убираем
+
+                                    // Add more visible text label
+                                    Imgproc.putText(
+                                        debugMat,
+                                        $"СТЕНА {i}: {rect.width}x{rect.height}",
+                                        new Point(rect.x, rect.y - 5),  // Располагаем ближе к прямоугольнику
+                                        Imgproc.FONT_HERSHEY_SIMPLEX,  // Более простой шрифт
+                                        0.5,  // Меньший размер шрифта
+                                        new Scalar(255, 255, 0),  // Yellow text
+                                        1  // Более тонкий текст
+                                    );
+
+                                    Point center = new Point(rect.x + rect.width / 2, rect.y + rect.height / 2);
+                                    // Draw larger center point - делаем менее заметным
+                                    Imgproc.circle(debugMat, center, 4, new Scalar(255, 0, 0), -1);
+                                    // Убираем внешний круг
+                              }
+
+                              // Draw more prominent statistics
                               Imgproc.rectangle(
                                   debugMat,
-                                  new Point(rect.x, rect.y),
-                                  new Point(rect.x + rect.width, rect.y + rect.height),
-                                  new Scalar(255, 0, 0, 255),
-                                  2
+                                  new Point(5, debugMat.rows() - 40),
+                                  new Point(300, debugMat.rows() - 5),
+                                  new Scalar(0, 0, 0, 150),
+                                  -1
                               );
 
-                              // Добавляем текст с информацией о контуре
                               Imgproc.putText(
                                   debugMat,
-                                  $"Wall {i}: {rect.width}x{rect.height}",
-                                  new Point(rect.x, rect.y - 5),
-                                  Imgproc.FONT_HERSHEY_SIMPLEX,
-                                  0.5,
-                                  new Scalar(255, 255, 0),
-                                  1
+                                  $"НАЙДЕНО ПЛОСКОСТЕЙ: {wallContours.Count}",
+                                  new Point(10, debugMat.rows() - 15),
+                                  Imgproc.FONT_HERSHEY_DUPLEX,
+                                  0.7,
+                                  new Scalar(0, 255, 255),  // Cyan
+                                  2
                               );
-
-                              // Отмечаем центр контура
-                              Point center = new Point(rect.x + rect.width / 2, rect.y + rect.height / 2);
-                              Imgproc.circle(debugMat, center, 5, new Scalar(0, 0, 255), -1);
                         }
 
-                        // Отображаем общее количество найденных контуров
-                        Imgproc.putText(
-                            debugMat,
-                            $"Контуры: {contours.Count}, Стены: {wallContours.Count}",
-                            new Point(10, debugMat.rows() - 10),
-                            Imgproc.FONT_HERSHEY_SIMPLEX,
-                            0.6,
-                            new Scalar(255, 255, 255),
-                            1
-                        );
-
-                        // Сохраняем данные для последующей обработки в основном потоке
+                        // Save results
                         lock (detectedWallsLock)
                         {
                               pendingWallContours.Clear();
                               pendingWallContours.AddRange(wallContours);
 
-                              // Сразу выводим информацию о найденных контурах
                               if (wallContours.Count > 0)
                               {
                                     Debug.Log($"Найдено {wallContours.Count} потенциальных стен:");
@@ -705,47 +806,21 @@ namespace Remalux.WallPainting.Vision
                                           OpenCVRect rect = contour.boundRect;
                                           Debug.Log($"  Стена {i}: размер {rect.width}x{rect.height}, соотношение {contour.aspectRatio:F2}");
                                     }
-                                    if (wallContours.Count > 5)
-                                    {
-                                          Debug.Log($"  ... и ещё {wallContours.Count - 5} контуров");
-                                    }
-                              }
-                              else
-                              {
-                                    Debug.Log("Не найдено контуров, подходящих для создания стен");
                               }
                         }
-
-                        // Задаем время обработки для отображения в статистике
-                        processingTime = (float)Stopwatch.GetTimestamp() / Stopwatch.Frequency - currentTime;
-
-                        // Сигнализируем, что новый кадр готов для отображения
-                        lock (contoursLock)
-                        {
-                              detectedWallContours.Clear();
-                              detectedWallContours.AddRange(wallContours);
-                        }
-
-                        // Сигнализируем, что отладочное изображение обновлено
-                        lock (debugMatLock)
-                        {
-                              debugMatUpdated = true;
-                        }
-
-                        // Cleanup temporary Mats to avoid memory leaks
-                        grayMat.release();
-                        edgeMat.release();
-                        kernel.release();
-                        hierarchy.release();
-                        binaryMat.release();
                   }
-                  catch (System.Exception e)
+                  catch (Exception e)
                   {
-                        Debug.LogError($"Ошибка при обработке кадра: {e.Message}\n{e.StackTrace}");
+                        Debug.LogError($"Ошибка при обработке кадра: {e}");
                   }
                   finally
                   {
-                        newFrameReady = false;
+                        // Освобождаем все Mat объекты
+                        if (grayMat != null) grayMat.release();
+                        if (edgeMat != null) edgeMat.release();
+                        if (binaryMat != null) binaryMat.release();
+                        if (hierarchy != null) hierarchy.release();
+                        if (kernel != null) kernel.release();
                   }
             }
 
@@ -1063,16 +1138,19 @@ namespace Remalux.WallPainting.Vision
                         OpenCVRect rect = wallContour.boundRect;
                         int imageWidth = workingMat.cols();
                         int imageHeight = workingMat.rows();
-                        int borderMargin = 10;
 
-                        if (rect.x <= borderMargin || rect.y <= borderMargin ||
-                            rect.x + rect.width >= imageWidth - borderMargin ||
-                            rect.y + rect.height >= imageHeight - borderMargin)
+                        // Убираем проверку на близость к краю, чтобы оставлять все стены
+                        // Оставляем только проверку минимальных размеров
+                        bool isTooSmall = rect.width < 30 || rect.height < 30;
+                        if (isTooSmall)
                         {
-                              // Пропускаем контур у края
-                              Debug.Log($"Пропускаем контур {i} у края изображения: {rect.x},{rect.y},{rect.width},{rect.height}");
+                              // Пропускаем слишком маленький контур
+                              Debug.Log($"Пропускаем контур {i} из-за малого размера: {rect.width}x{rect.height}");
                               continue;
                         }
+
+                        // Создаем стену даже на краю изображения
+                        Debug.Log($"Создаем стену из контура {i}: {rect.x},{rect.y},{rect.width}x{rect.height}");
 
                         // Нормализуем координаты контура, чтобы он был в интервале 0-1
                         float normalizedCenterX = wallContour.center.x / imageWidth;
@@ -1094,8 +1172,8 @@ namespace Remalux.WallPainting.Vision
                         Quaternion rotation;
                         Vector3 scale;
 
-                        // Определяем среднее расстояние до стены (5-10 метров)
-                        float distanceToWall = Random.Range(5f, 10f);
+                        // Используем более близкое расстояние для лучшей видимости
+                        float distanceToWall = Random.Range(1.5f, 3f);
 
                         // Позиция стены - направление луча умноженное на расстояние
                         position = ray.origin + ray.direction * distanceToWall;
@@ -1103,28 +1181,30 @@ namespace Remalux.WallPainting.Vision
                         // Ориентация стены - повернута лицом к камере
                         rotation = Quaternion.LookRotation(-ray.direction);
 
-                        // Размеры стены - пропорциональны размеру контура
+                        // Размеры стены - пропорциональны размеру контура, но увеличены для большей заметности
                         float widthRatio = (float)rect.width / imageWidth;
                         float heightRatio = (float)rect.height / imageHeight;
 
-                        // Преобразуем соотношения размеров в метры (например, 5 метров для полного экрана)
+                        // Преобразуем соотношения размеров в метры, увеличенные для лучшей видимости
                         float wallWidth = 5f * widthRatio;
                         float wallHeight = 5f * heightRatio;
 
-                        // Добавляем случайность для более естественного вида
-                        wallWidth = Mathf.Max(1f, wallWidth + Random.Range(-0.5f, 0.5f));
-                        wallHeight = Mathf.Max(1f, wallHeight + Random.Range(-0.5f, 0.5f));
+                        // Минимальные размеры для видимости - больше, чтобы стены были виднее
+                        wallWidth = Mathf.Max(1.0f, wallWidth);
+                        wallHeight = Mathf.Max(1.0f, wallHeight);
 
-                        scale = new Vector3(wallWidth, wallHeight, 0.1f);
+                        scale = new Vector3(wallWidth, wallHeight, 0.05f);
 
-                        // Создаем данные о стене
-                        WallData wallData = new WallData
-                        {
-                              position = position,
-                              rotation = rotation,
-                              scale = scale,
-                              id = i + 1 // ID стены, начиная с 1
-                        };
+                        // Создаем данные о стене с немного отодвинутой от камеры позицией
+                        // чтобы слегка выдвинуть стену вперед и сделать её более заметной
+                        Vector3 adjustedPosition = position + ray.direction * (-0.1f);
+
+                        WallData wallData = new WallData(
+                            adjustedPosition,
+                            rotation,
+                            scale,
+                            i + 1 // ID стены, начиная с 1
+                        );
 
                         walls.Add(wallData);
                         Debug.Log($"Создана стена {i + 1} в позиции {position}, размер {scale.x}x{scale.y}");
@@ -1134,21 +1214,298 @@ namespace Remalux.WallPainting.Vision
                   if (walls.Count > 0)
                   {
                         Debug.Log($"Найдено стен: {walls.Count}");
+
+                        // Добавляем яркое сообщение на экране о найденных стенах
+                        lock (debugMatLock)
+                        {
+                              // Яркий пульсирующий эффект по краям экрана - убираем
+                              float currentTime = (float)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
+                              int pulse = (int)(Math.Sin(currentTime * 4) * 50) + 150;
+
+                              // Убираем все рамки по краям экрана
+                              // Верхняя, нижняя, левая и правая рамки больше не рисуются
+
+                              // Большое, очень заметное сообщение в центре
+                              int centerX = debugMat.cols() / 2;
+                              int centerY = debugMat.rows() / 2;
+
+                              // Фон для сообщения
+                              Imgproc.rectangle(
+                                    debugMat,
+                                    new Point(centerX - 300, centerY - 100),
+                                    new Point(centerX + 300, centerY + 100),
+                                    new Scalar(0, 0, 0, 180),
+                                    -1
+                              );
+
+                              // Рамка сообщения - делаем менее заметной
+                              Imgproc.rectangle(
+                                    debugMat,
+                                    new Point(centerX - 300, centerY - 100),
+                                    new Point(centerX + 300, centerY + 100),
+                                    new Scalar(0, 200, 0, 200),
+                                    2
+                              );
+
+                              // Добавляем текст с заметным оформлением
+                              Imgproc.putText(
+                                    debugMat,
+                                    "ОБНАРУЖЕНЫ СТЕНЫ",
+                                    new Point(centerX - 220, centerY - 40),
+                                    Imgproc.FONT_HERSHEY_DUPLEX,
+                                    1.5,
+                                    new Scalar(0, 255, 0),
+                                    3
+                              );
+
+                              Imgproc.putText(
+                                    debugMat,
+                                    $"НАЙДЕНО {walls.Count} ПОВЕРХНОСТЕЙ",
+                                    new Point(centerX - 250, centerY + 40),
+                                    Imgproc.FONT_HERSHEY_DUPLEX,
+                                    1.2,
+                                    new Scalar(255, 255, 0),
+                                    2
+                              );
+
+                              // Добавляем стрелки к обнаруженным стенам - оставляем
+                              foreach (var wallContour in wallContours)
+                              {
+                                    OpenCVRect rect = wallContour.boundRect;
+                                    Point center = new Point(rect.x + rect.width / 2, rect.y + rect.height / 2);
+
+                                    // Рисуем стрелку от центра экрана к стене
+                                    Point screenCenter = new Point(debugMat.cols() / 2, debugMat.rows() / 2);
+
+                                    // Пульсирующая толщина стрелки
+                                    int arrowThickness = 2 + (int)(Math.Sin(currentTime * 5) * 2);
+
+                                    Imgproc.arrowedLine(
+                                          debugMat,
+                                          screenCenter,
+                                          center,
+                                          new Scalar(0, 255, 255, 255),
+                                          arrowThickness,
+                                          Imgproc.LINE_AA,
+                                          0,
+                                          0.3
+                                    );
+                              }
+
+                              debugMatUpdated = true;
+                        }
+
+                        // Сохраняем список текущих стен
+                        currentWalls.Clear();
+                        currentWalls.AddRange(walls);
+
                         OnWallsDetected?.Invoke(walls);
                   }
                   else
                   {
                         Debug.Log("Не найдено подходящих стен после обработки");
+
+                        // Добавляем уведомление о том, что стены не найдены
+                        lock (debugMatLock)
+                        {
+                              // Фон сообщения
+                              Imgproc.rectangle(
+                                    debugMat,
+                                    new Point(50, 50),
+                                    new Point(debugMat.cols() - 50, 120),
+                                    new Scalar(0, 0, 0, 150),
+                                    -1
+                              );
+
+                              // Текст сообщения
+                              Imgproc.putText(
+                                    debugMat,
+                                    "СТЕНЫ НЕ ОБНАРУЖЕНЫ. ПРОСКАНИРУЙТЕ КОМНАТУ",
+                                    new Point(debugMat.cols() / 2 - 250, 100),
+                                    Imgproc.FONT_HERSHEY_DUPLEX,
+                                    0.8,
+                                    new Scalar(255, 0, 0),
+                                    2
+                              );
+
+                              debugMatUpdated = true;
+                        }
                   }
             }
-      }
 
-      public struct WallData
-      {
-            public Vector3 position;
-            public Quaternion rotation;
-            public Vector3 scale;
-            public int id;
+            private void TryCreateDebugDisplay()
+            {
+                  Debug.LogWarning("WallDetector: Creating fallback debug display");
+
+                  // Try to find an existing RawImage in the scene to use
+                  RawImage[] rawImages = FindObjectsByType<RawImage>(FindObjectsSortMode.None);
+                  foreach (var image in rawImages)
+                  {
+                        if (image.name.Contains("Preview") || image.name.Contains("Camera"))
+                        {
+                              debugImageDisplay = image;
+                              Debug.Log("Found existing RawImage to use as debug display: " + image.name);
+                              return;
+                        }
+                  }
+
+                  // If none found, create a new one
+                  Canvas canvas = FindFirstObjectByType<Canvas>();
+                  if (canvas == null)
+                  {
+                        // Create new canvas
+                        GameObject canvasObj = new GameObject("Debug Canvas");
+                        canvas = canvasObj.AddComponent<Canvas>();
+                        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                        canvasObj.AddComponent<CanvasScaler>();
+                        canvasObj.AddComponent<GraphicRaycaster>();
+                  }
+
+                  // Create raw image for debug display
+                  GameObject imageObj = new GameObject("DebugImageDisplay");
+                  imageObj.transform.SetParent(canvas.transform, false);
+
+                  debugImageDisplay = imageObj.AddComponent<RawImage>();
+                  RectTransform rectTransform = debugImageDisplay.rectTransform;
+
+                  // Position in full screen by default (not corner)
+                  rectTransform.anchorMin = new Vector2(0, 0);
+                  rectTransform.anchorMax = new Vector2(1, 1);
+                  rectTransform.offsetMin = Vector2.zero;
+                  rectTransform.offsetMax = Vector2.zero;
+
+                  debugImageDisplay.color = Color.white;
+                  debugImageDisplay.gameObject.SetActive(true);
+
+                  Debug.Log("Created new debug image display in fullscreen mode");
+            }
+
+            // Добавляем метод для проверки клика на стену
+            private void CheckWallClick()
+            {
+                  // Проверяем, что есть обнаруженные стены
+                  if (currentWalls.Count == 0)
+                        return;
+
+                  // Получаем текущие входные данные
+                  bool isMousePressed = Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
+                  bool isTouchPressed = Touchscreen.current != null && Touchscreen.current.primaryTouch.press.wasPressedThisFrame;
+
+                  // Если нет нажатия, выходим
+                  if (!isMousePressed && !isTouchPressed)
+                        return;
+
+                  // Получаем позицию нажатия
+                  Vector2 inputPosition;
+                  if (isMousePressed)
+                        inputPosition = Mouse.current.position.ReadValue();
+                  else
+                        inputPosition = Touchscreen.current.primaryTouch.position.ReadValue();
+
+                  // Проверяем, что клик не по UI
+                  if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+                        return;
+
+                  // Создаем луч от камеры через точку клика
+                  Ray ray = mainCamera.ScreenPointToRay(inputPosition);
+
+                  // Переменные для определения ближайшей стены
+                  float closestDistance = float.MaxValue;
+                  WallData closestWall = null;
+
+                  // Проверяем попадание по каждой стене
+                  foreach (var wall in currentWalls)
+                  {
+                        // Создаем плоскость из позиции и ориентации стены
+                        Plane wallPlane = new Plane(wall.rotation * Vector3.back, wall.position);
+
+                        // Проверяем пересечение луча с плоскостью
+                        if (wallPlane.Raycast(ray, out float distance))
+                        {
+                              // Если это ближайшая стена, запоминаем её
+                              if (distance < closestDistance)
+                              {
+                                    // Находим точку пересечения луча с плоскостью
+                                    Vector3 hitPoint = ray.origin + ray.direction * distance;
+
+                                    // Проверяем, что точка находится в пределах стены
+                                    Vector3 localHitPoint = Quaternion.Inverse(wall.rotation) * (hitPoint - wall.position);
+                                    float halfWidth = wall.scale.x / 2f;
+                                    float halfHeight = wall.scale.y / 2f;
+
+                                    if (Mathf.Abs(localHitPoint.x) <= halfWidth && Mathf.Abs(localHitPoint.y) <= halfHeight)
+                                    {
+                                          closestDistance = distance;
+                                          closestWall = wall;
+                                    }
+                              }
+                        }
+                  }
+
+                  // Если нашли стену, выбираем её
+                  if (closestWall != null)
+                  {
+                        selectedWall = closestWall;
+                        Debug.Log($"Выбрана стена {selectedWall.id} на расстоянии {closestDistance:F2}м");
+
+                        // Окрашиваем стену при выборе
+                        OnWallSelected?.Invoke(selectedWall);
+
+                        // Отображаем выбранную стену на изображении
+                        HighlightSelectedWall();
+                  }
+            }
+
+            // Метод для подсветки выбранной стены
+            private void HighlightSelectedWall()
+            {
+                  if (selectedWall == null || debugMat == null)
+                        return;
+
+                  lock (debugMatLock)
+                  {
+                        // Ищем индекс выбранной стены
+                        int selectedIndex = -1;
+                        for (int i = 0; i < currentWalls.Count; i++)
+                        {
+                              if (currentWalls[i].id == selectedWall.id)
+                              {
+                                    selectedIndex = i;
+                                    break;
+                              }
+                        }
+
+                        // Если не нашли, выходим
+                        if (selectedIndex < 0 || pendingWallContours.Count <= selectedIndex)
+                              return;
+
+                        // Получаем контур выбранной стены
+                        WallContourData wallContour = pendingWallContours[selectedIndex];
+                        OpenCVRect rect = wallContour.boundRect;
+
+                        // Рисуем яркую рамку вокруг выбранной стены
+                        Imgproc.rectangle(
+                              debugMat,
+                              new Point(rect.x - 5, rect.y - 5),
+                              new Point(rect.x + rect.width + 5, rect.y + rect.height + 5),
+                              new Scalar(255, 255, 0, 255),  // Яркий желтый
+                              3  // Толстая линия
+                        );
+
+                        // Надпись "ВЫБРАНО"
+                        Imgproc.putText(
+                              debugMat,
+                              "ВЫБРАНО",
+                              new Point(rect.x, rect.y - 10),
+                              Imgproc.FONT_HERSHEY_DUPLEX,
+                              0.8,
+                              new Scalar(255, 255, 0),
+                              2
+                        );
+
+                        debugMatUpdated = true;
+                  }
+            }
       }
 }
 #pragma warning restore CS0414 // Restore warnings

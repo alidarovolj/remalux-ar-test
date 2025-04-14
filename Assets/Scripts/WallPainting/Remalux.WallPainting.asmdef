@@ -1,0 +1,26 @@
+{
+  "name": "Remalux.WallPainting",
+  "rootNamespace": "Remalux.WallPainting",
+  "references": [
+    "Unity.Mathematics",
+    "Unity.XR.ARFoundation",
+    "Unity.XR.ARSubsystems",
+    "Unity.XR.CoreUtils",
+    "Unity.XR.Management",
+    "Unity.XR.Interaction.Toolkit",
+    "Unity.InputSystem",
+    "Unity.Barracuda",
+    "EnoxSoftware.OpenCVForUnity",
+    "Remalux.AR",
+    "Unity.TextMeshPro"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": true,
+  "overrideReferences": true,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

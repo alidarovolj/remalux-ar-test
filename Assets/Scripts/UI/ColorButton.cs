@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Events;
 
-namespace Remalux.AR
+namespace Remalux.WallPainting
 {
       public class ColorButton : MonoBehaviour
       {
@@ -33,6 +33,16 @@ namespace Remalux.AR
             private void OnButtonClick()
             {
                   onColorSelected.Invoke(buttonColor);
+            }
+
+            public void Initialize(Color color, UnityAction<Color> onColorSelectedCallback)
+            {
+                  buttonColor = color;
+                  if (colorImage != null)
+                        colorImage.color = color;
+
+                  onColorSelected.RemoveAllListeners();
+                  onColorSelected.AddListener(onColorSelectedCallback);
             }
 
             public void SetColor(Color color)

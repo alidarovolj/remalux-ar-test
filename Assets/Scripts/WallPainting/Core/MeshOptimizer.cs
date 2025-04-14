@@ -1,7 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-namespace Remalux.AR
+namespace Remalux.WallPainting
 {
       public class MeshOptimizer : MonoBehaviour
       {

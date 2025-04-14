@@ -1,0 +1,48 @@
+# Инструкция по ручной настройке сцены
+
+## Способ 1: Используя готовую сцену
+1. Откройте файл сцены `Assets/WallPaintingScene.unity` двойным кликом
+2. Нажмите кнопку Play для тестирования
+
+## Способ 2: Ручная настройка через добавление компонента
+1. Создайте новую сцену: `File -> New Scene`
+2. Создайте пустой GameObject: `Create -> Create Empty`
+3. Переименуйте его в "WallPaintingAutoSetup"
+4. Добавьте компонент `WallPaintingAutoSetup` через "Add Component"
+5. Запустите сцену кнопкой Play
+6. Все компоненты будут созданы автоматически при запуске
+
+## Способ 3: Полностью ручная настройка без скриптов автоматизации
+1. Создайте новую сцену: `File -> New Scene`
+2. Создайте пустой GameObject: `Create -> Create Empty`
+3. Переименуйте его в "RealWallPaintingController"
+4. Добавьте компонент `RealWallPaintingController` через "Add Component"
+5. Создайте Main Camera, если её нет в сцене
+6. Создайте Canvas для UI элементов
+7. Добавьте RawImage для отображения превью камеры на Canvas
+8. Добавьте компонент `WallDetector` на объект RealWallPaintingController
+9. Создайте пустой GameObject с именем "TextureManager" и добавьте на него компонент `TextureManager`
+10. Вручную назначьте ссылки в инспекторе RealWallPaintingController:
+   - Main Camera
+   - Wall Detector
+   - Camera Preview (RawImage)
+   - TextureManager
+
+## Устранение проблем с Setup Using New Scene Setup Script
+Если у вас возникает ошибка с Arial.ttf при использовании "Setup Using New Scene Setup Script", это связано с тем, что Unity больше не поддерживает этот шрифт.
+
+Решение:
+1. Откройте файл Assets/Scripts/WallPainting/Setup/WallPaintingSceneSetup.cs
+2. Найдите строку `Font font = Resources.GetBuiltinResource<Font>("Arial.ttf");`
+3. Замените её на `Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");`
+4. Сохраните файл и попробуйте снова
+
+## Использование автоматической настройки из кода
+```csharp
+// Создаем настройщик сцены
+GameObject setupObj = new GameObject("WallPaintingSetup");
+var sceneSetup = setupObj.AddComponent<WallPaintingSceneSetup>();
+
+// Запускаем настройку
+sceneSetup.StartSetup();
+``` 

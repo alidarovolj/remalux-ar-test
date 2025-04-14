@@ -10,6 +10,7 @@ using OpenCVForUnity.UtilsModule;
 using OpenCVForUnity.Calib3dModule;
 using OpenCVRect = OpenCVForUnity.CoreModule.Rect;
 using UnityEngine.EventSystems; // Добавляем для доступа к EventSystem
+using Remalux.WallPainting.Vision;
 
 namespace Remalux.WallPainting.Vision
 {
@@ -242,6 +243,8 @@ namespace Remalux.WallPainting.Vision
             // Метод инициализации, вызывается при старте
             private void Start()
             {
+                  Debug.Log("RealWallPaintingController starting...");
+
                   // Initialize the paint color
                   currentPaintColor = duluxColors.Count > 0 ? duluxColors[0] : Color.white;
 
@@ -251,7 +254,7 @@ namespace Remalux.WallPainting.Vision
                   // Create the color palette UI
                   CreateColorPalette();
 
-                  // Инициализируем компоненты
+                  // Проверяем все необходимые компоненты
                   ValidateComponents();
 
                   // Set up user interface buttons
@@ -259,6 +262,13 @@ namespace Remalux.WallPainting.Vision
 
                   // Инициализируем камеру
                   InitializeCamera();
+
+                  // Устанавливаем режим камеры на полный экран изначально
+                  isFullScreenCamera = true;
+                  SetCameraViewMode(true);
+
+                  // Удаляем все рамки вокруг изображения камеры
+                  RemoveCameraPreviewBorders();
 
                   // Настраиваем WallDetector для лучшего обнаружения стен
                   if (wallDetector != null)
@@ -269,6 +279,9 @@ namespace Remalux.WallPainting.Vision
                         // Подписываемся на событие обнаружения стен
                         wallDetector.OnWallsDetected += OnWallsDetected;
 
+                        // Подписываемся на событие выбора стены
+                        wallDetector.OnWallSelected += OnWallSelected;
+
                         // Начинаем обнаружение стен
                         wallDetector.StartDetection();
                   }
@@ -276,76 +289,148 @@ namespace Remalux.WallPainting.Vision
                   {
                         Debug.LogError("WallDetector не назначен! Обнаружение стен не будет работать.");
                   }
+
+                  Debug.Log("RealWallPaintingController started successfully");
             }
 
             private void InitializeCamera()
             {
-                  // Проверяем доступные веб-камеры
-                  WebCamDevice[] devices = WebCamTexture.devices;
-                  Debug.Log($"Найдены веб-камеры: {devices.Length}");
+                  Debug.Log("Initializing camera system...");
 
-                  if (devices.Length == 0)
+                  // Create camera preview if needed
+                  if (cameraPreview == null)
                   {
-                        ShowMessage("Веб-камера не найдена", 5f);
+                        Debug.LogWarning("Camera preview RawImage not assigned, creating a new one");
+                        TryCreateCameraPreview();
+                  }
+
+                  // Early exit if still null
+                  if (cameraPreview == null)
+                  {
+                        Debug.LogError("Failed to create camera preview. Camera initialization failed.");
                         return;
-                  }
-
-                  // Выводим доступные камеры для отладки
-                  for (int i = 0; i < devices.Length; i++)
-                  {
-                        Debug.Log($"Камера: {devices[i].name}");
-                  }
-
-                  // Выбираем первую камеру
-                  string cameraName = devices[0].name;
-                  Debug.Log($"Выбрана веб-камера: {cameraName}");
-
-                  // Создаем новую текстуру веб-камеры
-                  if (webCamTexture != null)
-                  {
-                        webCamTexture.Stop();
-                        Destroy(webCamTexture);
                   }
 
                   try
                   {
-                        // Создаем текстуру с разрешением 1280x720
-                        webCamTexture = new WebCamTexture(cameraName, 1280, 720, 30);
-                        webCamTexture.Play();
-
-                        // Проверяем наличие RawImage для отображения камеры
-                        if (cameraPreview == null)
+                        // Check if webcam is available
+                        WebCamDevice[] devices = WebCamTexture.devices;
+                        if (devices.Length == 0)
                         {
-                              Debug.LogWarning("Camera preview RawImage not assigned, creating a new one");
-                              GameObject previewObj = new GameObject("CameraPreview");
-                              Canvas canvas = FindFirstObjectByType<Canvas>();
-                              if (canvas != null)
+                              Debug.LogWarning("No webcam found. Using placeholder texture.");
+                              CreatePlaceholderTexture();
+                              return;
+                        }
+
+                        // Create and start webcam texture
+                        int desiredWidth = 1280;
+                        int desiredHeight = 720;
+                        int desiredFPS = 30;
+
+                        string deviceName = string.Empty;
+                        // Try to find back camera on mobile, otherwise use first camera
+                        for (int i = 0; i < devices.Length; i++)
+                        {
+                              if (!devices[i].isFrontFacing)
                               {
-                                    previewObj.transform.SetParent(canvas.transform, false);
+                                    deviceName = devices[i].name;
+                                    break;
                               }
-                              RectTransform rectTransform = previewObj.AddComponent<RectTransform>();
-                              cameraPreview = previewObj.AddComponent<RawImage>();
                         }
 
-                        // Устанавливаем текстуру камеры в RawImage
-                        cameraPreview.texture = webCamTexture;
-
-                        // Устанавливаем масштаб по оси Y равным 1 (не переворачиваем камеру вертикально)
-                        if (cameraPreview.rectTransform != null)
+                        if (string.IsNullOrEmpty(deviceName) && devices.Length > 0)
                         {
-                              cameraPreview.rectTransform.localScale = new Vector3(1, 1, 1);
+                              deviceName = devices[0].name;
                         }
 
-                        // Устанавливаем режим отображения на полный экран сразу
-                        SetCameraViewMode(true);
+                        try
+                        {
+                              // If already exists, stop and destroy it
+                              if (webCamTexture != null)
+                              {
+                                    webCamTexture.Stop();
+                                    Destroy(webCamTexture);
+                              }
 
-                        ShowMessage("Камера инициализирована и отображается на весь экран", 3f);
+                              // Create new webcam texture
+                              webCamTexture = new WebCamTexture(deviceName, desiredWidth, desiredHeight, desiredFPS);
+
+                              // Start webcam
+                              webCamTexture.Play();
+
+                              // Assign to camera preview
+                              cameraPreview.texture = webCamTexture;
+
+                              Debug.Log($"Webcam started: {webCamTexture.width}x{webCamTexture.height}");
+
+                              // Make camera preview visible
+                              cameraPreview.enabled = true;
+
+                              // Set the camera view mode
+                              isFullScreenCamera = false; // Start with small preview in corner
+                              SetCameraViewMode(isFullScreenCamera);
+
+                              // Pass webcam texture to wall detector
+                              if (wallDetector != null)
+                              {
+                                    // Connect components
+                                    wallDetector.mainCamera = mainCamera;
+                                    wallDetector.SetDebugImageDisplay(cameraPreview);
+
+                                    // Start detection
+                                    wallDetector.StartDetection();
+                              }
+                        }
+                        catch (System.Exception e)
+                        {
+                              Debug.LogError($"Error starting webcam: {e.Message}");
+                              CreatePlaceholderTexture();
+                        }
                   }
                   catch (System.Exception e)
                   {
-                        Debug.LogError($"Ошибка при инициализации камеры: {e.Message}");
-                        ShowMessage("Ошибка инициализации камеры", 5f);
+                        Debug.LogError($"Error initializing camera: {e.Message}");
+                        CreatePlaceholderTexture();
                   }
+            }
+
+            private void CreatePlaceholderTexture()
+            {
+                  // Create a placeholder texture
+                  Texture2D placeholderTexture = new Texture2D(256, 256);
+
+                  // Create checkerboard pattern
+                  Color32[] colors = new Color32[256 * 256];
+                  for (int y = 0; y < 256; y++)
+                  {
+                        for (int x = 0; x < 256; x++)
+                        {
+                              bool isEvenX = (x / 32) % 2 == 0;
+                              bool isEvenY = (y / 32) % 2 == 0;
+
+                              if (isEvenX == isEvenY)
+                              {
+                                    colors[y * 256 + x] = new Color32(60, 60, 60, 255);
+                              }
+                              else
+                              {
+                                    colors[y * 256 + x] = new Color32(120, 120, 120, 255);
+                              }
+                        }
+                  }
+
+                  // Set and apply texture
+                  placeholderTexture.SetPixels32(colors);
+                  placeholderTexture.Apply();
+
+                  // Set to camera preview
+                  if (cameraPreview != null)
+                  {
+                        cameraPreview.texture = placeholderTexture;
+                        cameraPreview.enabled = true;
+                  }
+
+                  Debug.Log("Created placeholder texture for camera preview");
             }
 
             // Метод для создания тестовых стен при запуске, если не обнаруживаются реальные
@@ -399,44 +484,44 @@ namespace Remalux.WallPainting.Vision
                   List<WallData> testWalls = new List<WallData>();
 
                   // Создаем большую стену прямо перед камерой очень близко
-                  testWalls.Add(new WallData
-                  {
-                        position = mainCamera.transform.position + mainCamera.transform.forward * 3.0f,
-                        rotation = Quaternion.LookRotation(-mainCamera.transform.forward),
-                        scale = new Vector3(3.0f, 2.0f, 0.1f)
-                  });
+                  testWalls.Add(new WallData(
+                        mainCamera.transform.position + mainCamera.transform.forward * 3.0f,
+                        Quaternion.LookRotation(-mainCamera.transform.forward),
+                        new Vector3(3.0f, 2.0f, 0.1f),
+                        1
+                  ));
 
                   // Создаем стену справа от камеры, очень близко
-                  testWalls.Add(new WallData
-                  {
-                        position = mainCamera.transform.position + mainCamera.transform.right * 2.0f + mainCamera.transform.forward * 2.0f,
-                        rotation = Quaternion.LookRotation(-mainCamera.transform.right),
-                        scale = new Vector3(2.0f, 1.5f, 0.1f)
-                  });
+                  testWalls.Add(new WallData(
+                        mainCamera.transform.position + mainCamera.transform.right * 2.0f + mainCamera.transform.forward * 2.0f,
+                        Quaternion.LookRotation(-mainCamera.transform.right),
+                        new Vector3(2.0f, 1.5f, 0.1f),
+                        2
+                  ));
 
                   // Создаем стену слева от камеры, очень близко
-                  testWalls.Add(new WallData
-                  {
-                        position = mainCamera.transform.position - mainCamera.transform.right * 2.0f + mainCamera.transform.forward * 2.0f,
-                        rotation = Quaternion.LookRotation(mainCamera.transform.right),
-                        scale = new Vector3(2.0f, 1.5f, 0.1f)
-                  });
+                  testWalls.Add(new WallData(
+                        mainCamera.transform.position - mainCamera.transform.right * 2.0f + mainCamera.transform.forward * 2.0f,
+                        Quaternion.LookRotation(mainCamera.transform.right),
+                        new Vector3(2.0f, 1.5f, 0.1f),
+                        3
+                  ));
 
                   // Создаем стену над камерой, очень близко
-                  testWalls.Add(new WallData
-                  {
-                        position = mainCamera.transform.position + Vector3.up * 2.0f + mainCamera.transform.forward * 2.0f,
-                        rotation = Quaternion.LookRotation(Vector3.down),
-                        scale = new Vector3(2.0f, 2.0f, 0.1f)
-                  });
+                  testWalls.Add(new WallData(
+                        mainCamera.transform.position + Vector3.up * 2.0f + mainCamera.transform.forward * 2.0f,
+                        Quaternion.LookRotation(Vector3.down),
+                        new Vector3(2.0f, 2.0f, 0.1f),
+                        4
+                  ));
 
                   // Создаем стену под камерой, очень близко
-                  testWalls.Add(new WallData
-                  {
-                        position = mainCamera.transform.position + Vector3.down * 0.5f + mainCamera.transform.forward * 2.0f,
-                        rotation = Quaternion.LookRotation(Vector3.up),
-                        scale = new Vector3(2.0f, 2.0f, 0.1f)
-                  });
+                  testWalls.Add(new WallData(
+                        mainCamera.transform.position + Vector3.down * 0.5f + mainCamera.transform.forward * 2.0f,
+                        Quaternion.LookRotation(Vector3.up),
+                        new Vector3(2.0f, 2.0f, 0.1f),
+                        5
+                  ));
 
                   // Обрабатываем тестовые стены
                   OnWallsDetected(testWalls);
@@ -465,60 +550,60 @@ namespace Remalux.WallPainting.Vision
                   float halfHeight = roomHeight / 2;
 
                   // Создаем переднюю стену (впереди от камеры)
-                  roomWalls.Add(new WallData
-                  {
-                        position = roomCenter + new Vector3(0, 0, halfLength),
-                        rotation = Quaternion.LookRotation(Vector3.back), // Смотрит на камеру
-                        scale = new Vector3(roomWidth, roomHeight, wallThickness)
-                  });
+                  roomWalls.Add(new WallData(
+                        roomCenter + new Vector3(0, 0, halfLength),
+                        Quaternion.LookRotation(Vector3.back), // Смотрит на камеру
+                        new Vector3(roomWidth, roomHeight, wallThickness),
+                        6
+                  ));
 
                   // Создаем заднюю стену (позади камеры)
-                  roomWalls.Add(new WallData
-                  {
-                        position = roomCenter + new Vector3(0, 0, -halfLength),
-                        rotation = Quaternion.LookRotation(Vector3.forward),
-                        scale = new Vector3(roomWidth, roomHeight, wallThickness)
-                  });
+                  roomWalls.Add(new WallData(
+                        roomCenter + new Vector3(0, 0, -halfLength),
+                        Quaternion.LookRotation(Vector3.forward),
+                        new Vector3(roomWidth, roomHeight, wallThickness),
+                        7
+                  ));
 
                   // Создаем правую стену
-                  roomWalls.Add(new WallData
-                  {
-                        position = roomCenter + new Vector3(halfWidth, 0, 0),
-                        rotation = Quaternion.LookRotation(Vector3.left),
-                        scale = new Vector3(roomLength, roomHeight, wallThickness)
-                  });
+                  roomWalls.Add(new WallData(
+                        roomCenter + new Vector3(halfWidth, 0, 0),
+                        Quaternion.LookRotation(Vector3.left),
+                        new Vector3(roomLength, roomHeight, wallThickness),
+                        8
+                  ));
 
                   // Создаем левую стену
-                  roomWalls.Add(new WallData
-                  {
-                        position = roomCenter + new Vector3(-halfWidth, 0, 0),
-                        rotation = Quaternion.LookRotation(Vector3.right),
-                        scale = new Vector3(roomLength, roomHeight, wallThickness)
-                  });
+                  roomWalls.Add(new WallData(
+                        roomCenter + new Vector3(-halfWidth, 0, 0),
+                        Quaternion.LookRotation(Vector3.right),
+                        new Vector3(roomLength, roomHeight, wallThickness),
+                        9
+                  ));
 
                   // Создаем пол
-                  roomWalls.Add(new WallData
-                  {
-                        position = roomCenter + new Vector3(0, -halfHeight, 0),
-                        rotation = Quaternion.LookRotation(Vector3.up),
-                        scale = new Vector3(roomWidth, roomLength, wallThickness)
-                  });
+                  roomWalls.Add(new WallData(
+                        roomCenter + new Vector3(0, -halfHeight, 0),
+                        Quaternion.LookRotation(Vector3.up),
+                        new Vector3(roomWidth, roomLength, wallThickness),
+                        10
+                  ));
 
                   // Создаем потолок
-                  roomWalls.Add(new WallData
-                  {
-                        position = roomCenter + new Vector3(0, halfHeight, 0),
-                        rotation = Quaternion.LookRotation(Vector3.down),
-                        scale = new Vector3(roomWidth, roomLength, wallThickness)
-                  });
+                  roomWalls.Add(new WallData(
+                        roomCenter + new Vector3(0, halfHeight, 0),
+                        Quaternion.LookRotation(Vector3.down),
+                        new Vector3(roomWidth, roomLength, wallThickness),
+                        11
+                  ));
 
                   // Добавляем мебель или объекты для демонстрации (например, картину на стене)
-                  roomWalls.Add(new WallData
-                  {
-                        position = roomCenter + new Vector3(0, 0, halfLength - 0.05f) + new Vector3(1.0f, 0.3f, 0),
-                        rotation = Quaternion.LookRotation(Vector3.back),
-                        scale = new Vector3(1.5f, 1.0f, 0.05f)
-                  });
+                  roomWalls.Add(new WallData(
+                        roomCenter + new Vector3(0, 0, halfLength - 0.05f) + new Vector3(1.0f, 0.3f, 0),
+                        Quaternion.LookRotation(Vector3.back),
+                        new Vector3(1.5f, 1.0f, 0.05f),
+                        12
+                  ));
 
                   // Обрабатываем стены комнаты
                   OnWallsDetected(roomWalls);
@@ -528,30 +613,173 @@ namespace Remalux.WallPainting.Vision
 
             private void ValidateComponents()
             {
+                  bool hasErrors = false;
+
                   if (mainCamera == null)
                   {
                         mainCamera = Camera.main;
-                  }
-
-                  if (wallDetector == null)
-                  {
-                        wallDetector = GetComponent<WallDetector>();
-                  }
-
-                  if (textureManager == null)
-                  {
-                        textureManager = FindFirstObjectByType<TextureManager>();
+                        if (mainCamera == null)
+                        {
+                              Debug.LogWarning("RealWallPaintingController: Main camera not found. Some features may not work properly.");
+                              hasErrors = true;
+                        }
                   }
 
                   if (cameraPreview == null)
                   {
-                        Debug.LogError("RealWallPaintingController: Camera preview RawImage is not assigned!");
+                        Debug.LogWarning("RealWallPaintingController: Camera preview RawImage is not assigned! Creating one...");
+                        TryCreateCameraPreview();
                   }
 
-                  if (mainCamera == null || wallDetector == null || textureManager == null || cameraPreview == null)
+                  if (wallDetector == null)
                   {
-                        Debug.LogError("RealWallPaintingController: Missing required components!");
-                        enabled = false;
+                        Debug.LogWarning("Wall detection will not work without WallDetector component.");
+                        // Try to find or create wall detector
+                        wallDetector = GetComponent<WallDetector>();
+                        if (wallDetector == null)
+                        {
+                              wallDetector = gameObject.AddComponent<WallDetector>();
+                              Debug.Log("Created a new WallDetector component.");
+                        }
+                  }
+
+                  if (textureManager == null)
+                  {
+                        Debug.LogWarning("Texture management will not work without TextureManager component.");
+
+                        // Try to find texture manager
+                        textureManager = FindFirstObjectByType<TextureManager>();
+                        if (textureManager == null)
+                        {
+                              // Create a new texture manager
+                              GameObject textureManagerObj = new GameObject("TextureManager");
+                              textureManagerObj.transform.SetParent(transform);
+                              textureManager = textureManagerObj.AddComponent<TextureManager>();
+                              Debug.Log("Created a new TextureManager component.");
+
+                              // Initialize texture manager with default materials
+                              InitializeTextureManager();
+                        }
+                  }
+
+                  if (hasErrors)
+                  {
+                        Debug.LogWarning("RealWallPaintingController: Some required components are missing. Some features may not work properly.");
+                  }
+            }
+
+            private void InitializeTextureManager()
+            {
+                  if (textureManager == null) return;
+
+                  try
+                  {
+                        // Create default material
+                        Material defaultMaterial = new Material(Shader.Find("Standard"));
+                        defaultMaterial.color = Color.white;
+
+                        // Create some additional materials with different colors
+                        Material[] materials = new Material[5];
+                        materials[0] = defaultMaterial;
+
+                        for (int i = 1; i < materials.Length; i++)
+                        {
+                              materials[i] = new Material(Shader.Find("Standard"));
+                        }
+
+                        // Set different colors
+                        materials[1].color = new Color(0.9f, 0.6f, 0.3f);  // Beige
+                        materials[2].color = new Color(0.8f, 0.8f, 0.8f);  // Light gray
+                        materials[3].color = new Color(0.3f, 0.6f, 0.9f);  // Light blue
+                        materials[4].color = new Color(0.8f, 0.9f, 0.8f);  // Light green
+
+                        // Try to set materials through reflection
+                        var presetsField = textureManager.GetType().GetField("texturePresets",
+                                                                          System.Reflection.BindingFlags.Instance |
+                                                                          System.Reflection.BindingFlags.Public |
+                                                                          System.Reflection.BindingFlags.NonPublic);
+
+                        if (presetsField != null)
+                        {
+                              // Create appropriate type of presets collection
+                              var presetType = System.Type.GetType("Remalux.WallPainting.TextureManager+TexturePreset, Assembly-CSharp");
+                              if (presetType == null)
+                              {
+                                    presetType = System.Type.GetType("Remalux.WallPainting.TexturePreset, Assembly-CSharp");
+                              }
+
+                              if (presetType != null)
+                              {
+                                    // Create a list to hold presets
+                                    var listType = typeof(List<>).MakeGenericType(presetType);
+                                    var presetsList = System.Activator.CreateInstance(listType);
+                                    var addMethod = listType.GetMethod("Add");
+
+                                    // Add materials to presets
+                                    for (int i = 0; i < materials.Length; i++)
+                                    {
+                                          var preset = System.Activator.CreateInstance(presetType);
+
+                                          // Set properties
+                                          var nameField = presetType.GetField("name");
+                                          var materialField = presetType.GetField("material");
+                                          var colorField = presetType.GetField("tintColor");
+
+                                          if (nameField != null) nameField.SetValue(preset, $"Color {i + 1}");
+                                          if (materialField != null) materialField.SetValue(preset, materials[i]);
+                                          if (colorField != null) colorField.SetValue(preset, materials[i].color);
+
+                                          // Add to list
+                                          addMethod.Invoke(presetsList, new[] { preset });
+                                    }
+
+                                    // Set presets in texture manager
+                                    presetsField.SetValue(textureManager, presetsList);
+                                    Debug.Log("TextureManager initialized with default materials");
+                              }
+                        }
+                  }
+                  catch (System.Exception e)
+                  {
+                        Debug.LogError($"Failed to initialize TextureManager: {e.Message}");
+                  }
+            }
+
+            private void TryCreateCameraPreview()
+            {
+                  try
+                  {
+                        // Try to find a canvas
+                        Canvas canvas = FindFirstObjectByType<Canvas>();
+                        if (canvas == null)
+                        {
+                              // Create a new canvas
+                              GameObject canvasObj = new GameObject("Camera Preview Canvas");
+                              canvas = canvasObj.AddComponent<Canvas>();
+                              canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                              canvasObj.AddComponent<CanvasScaler>();
+                              canvasObj.AddComponent<GraphicRaycaster>();
+                        }
+
+                        // Create a RawImage for camera preview
+                        GameObject previewObj = new GameObject("Camera Preview");
+                        previewObj.transform.SetParent(canvas.transform, false);
+
+                        // Set up RawImage and RectTransform
+                        cameraPreview = previewObj.AddComponent<RawImage>();
+                        RectTransform rectTransform = cameraPreview.rectTransform;
+
+                        // Position in corner
+                        rectTransform.anchorMin = new Vector2(0.7f, 0.05f);
+                        rectTransform.anchorMax = new Vector2(0.95f, 0.25f);
+                        rectTransform.offsetMin = Vector2.zero;
+                        rectTransform.offsetMax = Vector2.zero;
+
+                        Debug.Log("Camera preview RawImage not assigned, creating a new one.");
+                  }
+                  catch (System.Exception e)
+                  {
+                        Debug.LogError("Failed to create camera preview: " + e.Message);
                   }
             }
 
@@ -748,7 +976,6 @@ namespace Remalux.WallPainting.Vision
             private void StartCapture()
             {
                   Debug.Log("Запуск обнаружения стен через OpenCV...");
-
                   // Получаем компонент WallDetector и настраиваем его
                   wallDetector = GetComponent<WallDetector>();
                   if (wallDetector == null)
@@ -867,9 +1094,9 @@ namespace Remalux.WallPainting.Vision
                   for (int i = 0; i < detectedWalls.Count; i++)
                   {
                         var wall = detectedWalls[i];
-                        if (wall.id <= 0)
+                        if (string.IsNullOrEmpty(wall.id))
                         {
-                              wall.id = i + 1; // ID начинается с 1
+                              wall.id = (i + 1).ToString(); // ID начинается с 1
                               detectedWalls[i] = wall;
                         }
                   }
@@ -1095,36 +1322,91 @@ namespace Remalux.WallPainting.Vision
             // Метод для установки режима отображения камеры
             public void SetCameraViewMode(bool fullscreen)
             {
-                  if (cameraPreview == null) return;
+                  if (cameraPreview == null)
+                  {
+                        Debug.LogError("Cannot set camera mode - cameraPreview is null");
+                        return;
+                  }
 
+                  // Сохраняем режим отображения
                   isFullScreenCamera = fullscreen;
 
-                  // Get the rect transform of the camera preview
-                  RectTransform rectTransform = cameraPreview.GetComponent<RectTransform>();
-                  if (rectTransform == null) return;
+                  // Получаем родительский объект для настройки размещения
+                  Transform parent = cameraPreview.transform.parent;
+                  RectTransform parentRect = null;
+                  if (parent != null)
+                  {
+                        parentRect = parent.GetComponent<RectTransform>();
+                  }
+
+                  // Настраиваем размер и позицию в зависимости от режима
+                  RectTransform rectTransform = cameraPreview.rectTransform;
 
                   if (fullscreen)
                   {
-                        // Full-screen mode
-                        rectTransform.anchorMin = new Vector2(0, 0);
-                        rectTransform.anchorMax = new Vector2(1, 1);
+                        // Полноэкранный режим - занимает весь экран без рамок
+
+                        // Если у превью есть родитель, настраиваем его тоже на весь экран
+                        if (parentRect != null)
+                        {
+                              parentRect.anchorMin = Vector2.zero;
+                              parentRect.anchorMax = Vector2.one;
+                              parentRect.offsetMin = Vector2.zero;
+                              parentRect.offsetMax = Vector2.zero;
+                              parentRect.sizeDelta = Vector2.zero;
+                        }
+
+                        // Настраиваем само превью
+                        rectTransform.anchorMin = Vector2.zero;
+                        rectTransform.anchorMax = Vector2.one;
                         rectTransform.offsetMin = Vector2.zero;
                         rectTransform.offsetMax = Vector2.zero;
+                        rectTransform.sizeDelta = Vector2.zero;
 
-                        // Full opacity
+                        // Удаляем любые границы/рамки, если они есть
+                        Image borderImage = cameraPreview.GetComponent<Image>();
+                        if (borderImage != null)
+                        {
+                              borderImage.enabled = false;
+                        }
+
+                        // Полная непрозрачность
                         cameraPreview.color = Color.white;
+
+                        // Делаем превью видимым
+                        cameraPreview.gameObject.SetActive(true);
                   }
                   else
                   {
-                        // Small preview in corner
-                        rectTransform.anchorMin = new Vector2(0.7f, 0.05f);
-                        rectTransform.anchorMax = new Vector2(0.95f, 0.25f);
+                        // Режим превью - маленькое окно в правом нижнем углу
+
+                        // Возвращаем родительский rect к нормальному состоянию если нужно
+                        if (parentRect != null)
+                        {
+                              parentRect.anchorMin = new Vector2(0.7f, 0.05f);
+                              parentRect.anchorMax = new Vector2(0.95f, 0.25f);
+                              parentRect.offsetMin = Vector2.zero;
+                              parentRect.offsetMax = Vector2.zero;
+                        }
+
+                        // Настраиваем превью
+                        rectTransform.anchorMin = Vector2.zero;
+                        rectTransform.anchorMax = Vector2.one;
                         rectTransform.offsetMin = Vector2.zero;
                         rectTransform.offsetMax = Vector2.zero;
 
-                        // Semi-transparent
+                        // Включаем рамку если есть
+                        Image borderImage = cameraPreview.GetComponent<Image>();
+                        if (borderImage != null)
+                        {
+                              borderImage.enabled = true;
+                        }
+
+                        // Небольшая прозрачность
                         cameraPreview.color = new Color(1, 1, 1, 0.8f);
                   }
+
+                  Debug.Log($"Camera view mode set to {(fullscreen ? "fullscreen" : "preview")} with rect: {rectTransform.rect}");
             }
 
             // Метод для обновления видимости маркеров стен
@@ -1251,7 +1533,6 @@ namespace Remalux.WallPainting.Vision
                   // Удаляем эффект через короткое время
                   Destroy(clickEffect, 0.5f);
             }
-
             // Корутина для эффекта затухания клика
             private IEnumerator FadeOutClickEffect(GameObject effect)
             {
@@ -1629,6 +1910,7 @@ namespace Remalux.WallPainting.Vision
                   {
                         Debug.LogError($"Ошибка при покраске стены: {e.Message}");
                   }
+
             }
 
             // Метод для получения текущего цвета покраски
@@ -1692,16 +1974,34 @@ namespace Remalux.WallPainting.Vision
                   // Создаем спрайт из текстуры, используем полное имя UnityEngine.Rect для устранения неоднозначности
                   return Sprite.Create(texture, new UnityEngine.Rect(0, 0, resolution, resolution), new Vector2(0.5f, 0.5f));
             }
-
             // Метод для создания материала подсветки
             private void CreateHighlightMaterial()
             {
-                  if (highlightMaterial == null)
+                  try
                   {
+                        // Create a new material for highlighting walls
                         highlightMaterial = new Material(Shader.Find("Standard"));
-                        highlightMaterial.color = new Color(1f, 0.8f, 0.0f, 0.8f); // Желтый цвет для подсветки
-                        highlightMaterial.EnableKeyword("_EMISSION");
-                        highlightMaterial.SetColor("_EmissionColor", new Color(1f, 0.8f, 0.0f, 0.8f) * 0.5f);
+                        if (highlightMaterial != null)
+                        {
+                              highlightMaterial.color = new Color(1, 0.92f, 0.016f, 0.5f); // Semi-transparent yellow
+                              highlightMaterial.EnableKeyword("_EMISSION");
+                              highlightMaterial.SetColor("_EmissionColor", new Color(1f, 0.9f, 0.1f, 1f));
+                        }
+                        else
+                        {
+                              Debug.LogWarning("Failed to create highlight material using Standard shader");
+
+                              // Try with a different shader as fallback
+                              highlightMaterial = new Material(Shader.Find("Unlit/Color"));
+                              if (highlightMaterial != null)
+                              {
+                                    highlightMaterial.color = new Color(1, 0.92f, 0.016f, 0.5f);
+                              }
+                        }
+                  }
+                  catch (System.Exception e)
+                  {
+                        Debug.LogError($"Error creating highlight material: {e.Message}");
                   }
             }
 
@@ -2064,7 +2364,167 @@ namespace Remalux.WallPainting.Vision
                         Debug.Log($"Покрашена выделенная стена: {highlightedWall.name}");
                   }
             }
+
+            // Метод для удаления всех рамок и визуальных элементов, которые могут мешать полноэкранному изображению камеры
+            private void RemoveCameraPreviewBorders()
+            {
+                  if (cameraPreview == null) return;
+
+                  // Находим все возможные родительские объекты с компонентами, которые могут создавать визуальные рамки
+                  Transform current = cameraPreview.transform;
+                  while (current != null)
+                  {
+                        // Отключаем все изображения, которые могут создавать рамки
+                        Image img = current.GetComponent<Image>();
+                        if (img != null && img.gameObject != cameraPreview.gameObject)
+                        {
+                              img.enabled = false;
+                              Debug.Log($"Disabled Image component on {current.name} to remove borders");
+                        }
+
+                        // Настраиваем все RectTransform на заполнение всего доступного пространства
+                        RectTransform rect = current.GetComponent<RectTransform>();
+                        if (rect != null)
+                        {
+                              rect.anchorMin = Vector2.zero;
+                              rect.anchorMax = Vector2.one;
+                              rect.offsetMin = Vector2.zero;
+                              rect.offsetMax = Vector2.zero;
+                              rect.sizeDelta = Vector2.zero;
+                              Debug.Log($"Set RectTransform on {current.name} to fill entire available space");
+                        }
+
+                        current = current.parent;
+                  }
+
+                  // Убеждаемся, что само превью настроено правильно
+                  cameraPreview.color = Color.white;
+                  // RawImage не имеет свойства preserveAspect - используем uvRect вместо этого
+                  cameraPreview.uvRect = new UnityEngine.Rect(0, 0, 1, 1);
+
+                  // Заставляем Canvas перерисоваться
+                  Canvas.ForceUpdateCanvases();
+
+                  // Обновляем текстуру превью
+                  // ... existing code ...
+            }
+
+            // Метод для обработки события выбора стены
+            private void OnWallSelected(WallData wallData)
+            {
+                  // Проверяем данные
+                  if (wallData == null)
+                  {
+                        Debug.LogWarning("Получены пустые данные о стене");
+                        return;
+                  }
+
+                  Debug.Log($"Стена {wallData.id} выбрана для покраски");
+
+                  // Получаем текущий цвет для покраски
+                  Color paintColor = GetPaintColor();
+
+                  // Находим или создаем GameObject для стены
+                  GameObject wallObject = FindWallObjectById(int.Parse(wallData.id));
+
+                  if (wallObject == null)
+                  {
+                        // Создаем новый объект стены
+                        wallObject = CreateWallObject(wallData);
+
+                        if (wallObject == null)
+                        {
+                              Debug.LogError("Не удалось создать объект стены");
+                              return;
+                        }
+                  }
+
+                  // Красим стену
+                  PaintWallTexture(wallObject, paintColor);
+
+                  // Эффекты покраски для визуального отклика
+                  CreatePaintEffectAtHitPoint(wallObject.transform.position, wallObject.transform.forward, paintColor);
+
+                  // Показываем сообщение пользователю
+                  ShowMessage($"Стена #{wallData.id} окрашена в выбранный цвет", 2.0f);
+
+                  // Вызываем событие покраски стены
+                  OnWallPainted?.Invoke(wallObject);
+            }
+
+            // Метод для поиска объекта стены по ID
+            private GameObject FindWallObjectById(int wallId)
+            {
+                  // Ищем среди существующих стен по имени
+                  foreach (var wall in createdWallObjects)
+                  {
+                        if (wall != null && wall.name == $"Wall_{wallId}")
+                        {
+                              return wall;
+                        }
+                  }
+
+                  // Если ещё не создан, возвращаем null
+                  return null;
+            }
+
+            // Метод для создания 3D объекта стены
+            private GameObject CreateWallObject(WallData wallData)
+            {
+                  try
+                  {
+                        // Создаем объект стены
+                        GameObject wallObject = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                        wallObject.name = $"Wall_{wallData.id}";
+
+                        // Устанавливаем позицию, вращение и масштаб
+                        wallObject.transform.position = wallData.position;
+                        wallObject.transform.rotation = wallData.rotation;
+                        wallObject.transform.localScale = wallData.scale;
+
+                        // Настраиваем материал
+                        Renderer renderer = wallObject.GetComponent<Renderer>();
+                        if (renderer != null)
+                        {
+                              Material material = new Material(Shader.Find("Standard"));
+                              material.name = "WallMaterial";
+                              material.SetFloat("_Glossiness", 0.1f);
+                              material.SetFloat("_Metallic", 0.0f);
+
+                              // Полупрозрачный материал, чтобы видеть камеру сквозь стену
+                              Color defaultColor = new Color(0.9f, 0.9f, 0.9f, 0.7f);
+                              material.color = defaultColor;
+
+                              // Включаем прозрачность
+                              material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                              material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                              material.SetInt("_ZWrite", 0);
+                              material.DisableKeyword("_ALPHATEST_ON");
+                              material.EnableKeyword("_ALPHABLEND_ON");
+                              material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+                              material.renderQueue = 3000;
+
+                              renderer.material = material;
+                        }
+
+                        // Добавляем коллайдер для обработки кликов
+                        wallObject.AddComponent<BoxCollider>();
+
+                        // Назначаем слой Wall
+                        wallObject.layer = LayerMask.NameToLayer("Wall");
+
+                        // Добавляем в список созданных стен
+                        createdWallObjects.Add(wallObject);
+
+                        Debug.Log($"Создан объект стены {wallData.id} в позиции {wallData.position}");
+
+                        return wallObject;
+                  }
+                  catch (System.Exception e)
+                  {
+                        Debug.LogError($"Ошибка при создании объекта стены: {e.Message}");
+                        return null;
+                  }
+            }
       }
 }
-#pragma warning restore CS0414 // Restore warnings
-

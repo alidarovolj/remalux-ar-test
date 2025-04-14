@@ -1,10 +1,176 @@
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
 namespace Remalux.WallPainting.Vision
 {
-      public static class RealWallPaintingSetup
+      [RequireComponent(typeof(RealWallPaintingController))]
+      public class RealWallPaintingSetup : MonoBehaviour
       {
+            [Header("Camera Setup")]
+            [SerializeField] private Camera mainCamera;
+
+            [Header("UI Setup")]
+            [SerializeField] private Canvas mainCanvas;
+            [SerializeField] private RectTransform cameraPreviewParent;
+
+            [Header("Wall Detection")]
+            [SerializeField] private bool createWallDetector = true;
+
+            private RealWallPaintingController paintingController;
+            private WallDetector wallDetector;
+            private RawImage cameraPreview;
+
+            private void Awake()
+            {
+                  // Get or create components
+                  paintingController = GetComponent<RealWallPaintingController>();
+
+                  // Find camera if not set
+                  if (mainCamera == null)
+                        mainCamera = Camera.main;
+
+                  if (mainCamera == null)
+                  {
+                        Debug.LogError("RealWallPaintingSetup: No main camera found in the scene!");
+                        return;
+                  }
+
+                  // Set up canvas if needed
+                  SetupCanvas();
+
+                  // Set up camera preview
+                  SetupCameraPreview();
+
+                  // Set up wall detector
+                  SetupWallDetector();
+
+                  // Set up the painting controller with all our references
+                  ConfigurePaintingController();
+            }
+
+            private void SetupCanvas()
+            {
+                  if (mainCanvas == null)
+                  {
+                        // Look for existing canvas
+                        mainCanvas = FindFirstObjectByType<Canvas>();
+
+                        // Create canvas if not found
+                        if (mainCanvas == null)
+                        {
+                              GameObject canvasObj = new GameObject("Main Canvas");
+                              mainCanvas = canvasObj.AddComponent<Canvas>();
+                              mainCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                              canvasObj.AddComponent<CanvasScaler>();
+                              canvasObj.AddComponent<GraphicRaycaster>();
+                        }
+                  }
+
+                  // Make sure we have EventSystem
+                  if (FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
+                  {
+                        GameObject eventSystem = new GameObject("Event System");
+                        eventSystem.AddComponent<UnityEngine.EventSystems.EventSystem>();
+                        eventSystem.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+                  }
+            }
+
+            private void SetupCameraPreview()
+            {
+                  // Create camera preview parent if needed
+                  if (cameraPreviewParent == null)
+                  {
+                        GameObject previewParentObj = new GameObject("Camera Preview Parent");
+                        previewParentObj.transform.SetParent(mainCanvas.transform, false);
+                        cameraPreviewParent = previewParentObj.AddComponent<RectTransform>();
+
+                        // Position in corner
+                        cameraPreviewParent.anchorMin = new Vector2(0.7f, 0.05f);
+                        cameraPreviewParent.anchorMax = new Vector2(0.95f, 0.25f);
+                        cameraPreviewParent.offsetMin = Vector2.zero;
+                        cameraPreviewParent.offsetMax = Vector2.zero;
+                  }
+
+                  // Create RawImage for camera preview
+                  GameObject previewObj = new GameObject("Camera Preview");
+                  previewObj.transform.SetParent(cameraPreviewParent, false);
+
+                  RectTransform previewRect = previewObj.AddComponent<RectTransform>();
+                  previewRect.anchorMin = Vector2.zero;
+                  previewRect.anchorMax = Vector2.one;
+                  previewRect.offsetMin = Vector2.zero;
+                  previewRect.offsetMax = Vector2.zero;
+
+                  cameraPreview = previewObj.AddComponent<RawImage>();
+                  cameraPreview.color = new Color(1, 1, 1, 0.8f);
+            }
+
+            private void SetupWallDetector()
+            {
+                  if (createWallDetector)
+                  {
+                        // Create or get wall detector
+                        wallDetector = GetComponent<WallDetector>();
+                        if (wallDetector == null)
+                        {
+                              wallDetector = gameObject.AddComponent<WallDetector>();
+                        }
+
+                        // Configure wall detector
+                        wallDetector.mainCamera = mainCamera;
+
+                        // Set reasonable default values
+                        var properties = wallDetector.GetType().GetFields(System.Reflection.BindingFlags.Instance |
+                                                                         System.Reflection.BindingFlags.Public |
+                                                                         System.Reflection.BindingFlags.NonPublic);
+
+                        foreach (var prop in properties)
+                        {
+                              if (prop.Name == "lineThreshold")
+                                    prop.SetValue(wallDetector, 50);
+                              else if (prop.Name == "minLineLength")
+                                    prop.SetValue(wallDetector, 30);
+                              else if (prop.Name == "maxLineGap")
+                                    prop.SetValue(wallDetector, 10);
+                              else if (prop.Name == "showContours")
+                                    prop.SetValue(wallDetector, true);
+                              else if (prop.Name == "showDebugLines")
+                                    prop.SetValue(wallDetector, true);
+                        }
+                  }
+            }
+
+            private void ConfigurePaintingController()
+            {
+                  if (paintingController != null)
+                  {
+                        // Set main camera
+                        var cameraProp = paintingController.GetType().GetField("mainCamera",
+                                                                              System.Reflection.BindingFlags.Instance |
+                                                                              System.Reflection.BindingFlags.Public);
+                        if (cameraProp != null)
+                              cameraProp.SetValue(paintingController, mainCamera);
+
+                        // Set wall detector
+                        var detectorProp = paintingController.GetType().GetField("wallDetector",
+                                                                              System.Reflection.BindingFlags.Instance |
+                                                                              System.Reflection.BindingFlags.Public);
+                        if (detectorProp != null)
+                              detectorProp.SetValue(paintingController, wallDetector);
+
+                        // Set camera preview
+                        var previewProp = paintingController.GetType().GetField("cameraPreview",
+                                                                              System.Reflection.BindingFlags.Instance |
+                                                                              System.Reflection.BindingFlags.Public);
+                        if (previewProp != null)
+                              previewProp.SetValue(paintingController, cameraPreview);
+
+                        Debug.Log("RealWallPaintingSetup: Successfully configured RealWallPaintingController");
+                  }
+            }
+
+            // Simplified static method for setup - removes AR dependency issues
             public static void CreateRealWallPaintingScene()
             {
                   Debug.Log("Creating real wall painting scene...");
@@ -17,109 +183,37 @@ namespace Remalux.WallPainting.Vision
                   GameObject controllerObject = new GameObject("RealWallPaintingController");
                   RealWallPaintingController controller = controllerObject.AddComponent<RealWallPaintingController>();
 
+                  // Add setup script that will handle all the component connections
+                  var setup = controllerObject.AddComponent<RealWallPaintingSetup>();
+
                   // Create camera
                   GameObject cameraObject = new GameObject("MainCamera");
                   Camera camera = cameraObject.AddComponent<Camera>();
                   camera.tag = "MainCamera";
                   cameraObject.AddComponent<AudioListener>();
 
-                  // Create wall detector
-                  GameObject detectorObject = new GameObject("WallDetector");
-                  WallDetector wallDetector = detectorObject.AddComponent<WallDetector>();
+                  // Create simple camera rig
+                  GameObject cameraParent = new GameObject("Camera Rig");
+                  cameraObject.transform.SetParent(cameraParent.transform);
+                  cameraParent.transform.SetParent(controllerObject.transform);
 
-                  // Create texture manager
-                  GameObject textureManagerObject = new GameObject("TextureManager");
-                  TextureManager textureManager = textureManagerObject.AddComponent<TextureManager>();
-
-                  // Create room manager
-                  GameObject roomManagerObject = new GameObject("RoomManager");
-                  RoomManager roomManager = roomManagerObject.AddComponent<RoomManager>();
-
-                  // Create improved lighting
+                  // Create lighting
                   CreateLighting();
 
                   // Create test room with walls
                   CreateTestRoom();
 
-                  // Создаем градиентный фон вместо розового
+                  // Create UI elements
+                  GameObject canvasObject = new GameObject("UI Canvas");
+                  Canvas canvas = canvasObject.AddComponent<Canvas>();
+                  canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                  canvasObject.AddComponent<CanvasScaler>();
+                  canvasObject.AddComponent<GraphicRaycaster>();
+                  canvasObject.transform.SetParent(controllerObject.transform);
+
+                  // Create background
                   GameObject bgCanvasObject = CreateBackgroundCanvas();
-
-                  // Create UI background for camera preview
-                  GameObject bgCanvas = new GameObject("Camera Preview Background Canvas");
-                  Canvas cameraCanvas = bgCanvas.AddComponent<Canvas>();
-                  cameraCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                  cameraCanvas.sortingOrder = 0;
-                  CanvasScaler canvasScaler = bgCanvas.AddComponent<CanvasScaler>();
-                  canvasScaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-                  canvasScaler.referenceResolution = new Vector2(1920, 1080);
-
-                  // Create a RawImage to display the camera feed
-                  GameObject previewObj = new GameObject("Camera Preview");
-                  previewObj.transform.SetParent(bgCanvas.transform, false);
-                  RawImage preview = previewObj.AddComponent<RawImage>();
-                  preview.color = Color.white;
-
-                  // Setup RectTransform for the preview
-                  RectTransform rectTransform = preview.GetComponent<RectTransform>();
-                  rectTransform.anchorMin = new Vector2(0.7f, 0.05f);
-                  rectTransform.anchorMax = new Vector2(0.95f, 0.25f);
-                  rectTransform.offsetMin = Vector2.zero;
-                  rectTransform.offsetMax = Vector2.zero;
-
-                  // Create UI canvas for buttons
-                  GameObject uiCanvasObject = new GameObject("UI Canvas");
-                  Canvas uiCanvas = uiCanvasObject.AddComponent<Canvas>();
-                  uiCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                  uiCanvas.sortingOrder = 1; // Ensure it's in front of the camera preview
-                  var uiScaler = uiCanvasObject.AddComponent<CanvasScaler>();
-                  uiScaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-                  uiScaler.referenceResolution = new Vector2(1920, 1080);
-                  uiCanvasObject.AddComponent<GraphicRaycaster>();
-
-                  // Удаляем создание кнопок Capture и Reset
-                  // var captureButton = CreateButton("Capture Button", uiCanvasObject.transform, new Vector2(0.5f, 0.1f), "Capture");
-                  // var resetButton = CreateButton("Reset Button", uiCanvasObject.transform, new Vector2(0.8f, 0.1f), "Reset");
-
-                  // Setup references directly
-                  controller.mainCamera = camera;
-                  controller.wallDetector = wallDetector;
-                  controller.textureManager = textureManager;
-                  controller.cameraPreview = preview;
-                  // controller.captureButton = captureButton;
-                  // controller.resetButton = resetButton;
-
-                  // Setup wall detector
-                  wallDetector.SetDebugImageDisplay(preview);
-                  wallDetector.mainCamera = camera;
-
-                  // Начинаем детекцию
-                  wallDetector.StartDetection();
-
-                  // Organize hierarchy
-                  roomManagerObject.transform.SetParent(controllerObject.transform);
-                  textureManagerObject.transform.SetParent(controllerObject.transform);
-                  detectorObject.transform.SetParent(controllerObject.transform);
                   bgCanvasObject.transform.SetParent(controllerObject.transform);
-                  uiCanvasObject.transform.SetParent(controllerObject.transform);
-
-                  // Position the camera
-                  cameraObject.transform.position = new Vector3(0, 1.6f, 0); // Примерная высота глаз
-                  cameraObject.transform.SetParent(controllerObject.transform);
-
-                  // Добавим коллайдер для камеры, чтобы она не проходила сквозь стены
-                  var cameraCollider = cameraObject.AddComponent<SphereCollider>();
-                  cameraCollider.radius = 0.5f;
-                  cameraCollider.isTrigger = false;
-
-                  // Добавим Rigidbody к камере для физического взаимодействия
-                  var cameraRigidbody = cameraObject.AddComponent<Rigidbody>();
-                  cameraRigidbody.useGravity = true;
-                  cameraRigidbody.freezeRotation = true; // Замораживаем вращение
-
-                  Debug.Log("Камера настроена на позиции: " + cameraObject.transform.position);
-
-                  // Ensure the controller is enabled
-                  controller.enabled = true;
 
                   Debug.Log("Real wall painting scene created successfully!");
             }
@@ -163,11 +257,6 @@ namespace Remalux.WallPainting.Vision
                   pointLightComponent.color = Color.white;
                   pointLight.transform.position = new Vector3(0f, 1f, 0f);
 
-                  // Настраиваем глобальное окружающее освещение
-                  RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Skybox;
-                  RenderSettings.ambientIntensity = 1.5f;
-                  RenderSettings.reflectionIntensity = 1.0f;
-
                   Debug.Log("Улучшенное освещение создано");
             }
 
@@ -175,6 +264,8 @@ namespace Remalux.WallPainting.Vision
             {
                   // Создаем простую комнату с 4 стенами для тестирования
                   Debug.Log("Создаю тестовую комнату для покраски");
+
+                  GameObject roomContainer = new GameObject("Test Room");
 
                   // Размеры комнаты
                   float width = 10f;
@@ -185,6 +276,7 @@ namespace Remalux.WallPainting.Vision
                   // Создаем пол
                   var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
                   floor.name = "Floor";
+                  floor.transform.SetParent(roomContainer.transform);
                   floor.transform.position = new Vector3(0, -height / 2, 0);
                   floor.transform.localScale = new Vector3(width, wallThickness, depth);
 
@@ -193,97 +285,61 @@ namespace Remalux.WallPainting.Vision
                   if (floorRenderer != null)
                   {
                         Material floorMaterial = new Material(Shader.Find("Standard"));
-                        floorMaterial.color = new Color(0.8f, 0.8f, 0.8f); // Светло-серый
+                        floorMaterial.color = new Color(0.8f, 0.8f, 0.8f);
                         floorMaterial.SetFloat("_Glossiness", 0.2f);
                         floorRenderer.material = floorMaterial;
                   }
 
-                  // Создаем потолок
-                  var ceiling = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                  ceiling.name = "Ceiling";
-                  ceiling.transform.position = new Vector3(0, height / 2, 0);
-                  ceiling.transform.localScale = new Vector3(width, wallThickness, depth);
+                  // Создаем стены
+                  // Передняя стена
+                  CreateWall("Front Wall", roomContainer.transform,
+                      new Vector3(0, 0, depth / 2),
+                      new Vector3(width, height, wallThickness));
 
-                  // Установим более светлый материал для потолка
-                  Renderer ceilingRenderer = ceiling.GetComponent<Renderer>();
-                  if (ceilingRenderer != null)
+                  // Задняя стена
+                  CreateWall("Back Wall", roomContainer.transform,
+                      new Vector3(0, 0, -depth / 2),
+                      new Vector3(width, height, wallThickness));
+
+                  // Левая стена
+                  CreateWall("Left Wall", roomContainer.transform,
+                      new Vector3(-width / 2, 0, 0),
+                      new Vector3(wallThickness, height, depth));
+
+                  // Правая стена
+                  CreateWall("Right Wall", roomContainer.transform,
+                      new Vector3(width / 2, 0, 0),
+                      new Vector3(wallThickness, height, depth));
+
+                  Debug.Log("Тестовая комната создана успешно");
+            }
+
+            private static GameObject CreateWall(string name, Transform parent, Vector3 position, Vector3 scale)
+            {
+                  var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                  wall.name = name;
+                  wall.transform.SetParent(parent);
+                  wall.transform.position = position;
+                  wall.transform.localScale = scale;
+
+                  // Настраиваем материал стены
+                  Renderer wallRenderer = wall.GetComponent<Renderer>();
+                  if (wallRenderer != null)
                   {
-                        Material ceilingMaterial = new Material(Shader.Find("Standard"));
-                        ceilingMaterial.color = new Color(0.9f, 0.9f, 0.9f); // Почти белый
-                        ceilingMaterial.SetFloat("_Glossiness", 0.1f);
-                        ceilingRenderer.material = ceilingMaterial;
+                        SetDefaultWallMaterial(wallRenderer);
                   }
 
-                  // Создаем стены и назначаем тег "Wall"
-                  var frontWall = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                  frontWall.name = "Front Wall";
-                  frontWall.transform.position = new Vector3(0, 0, depth / 2);
-                  frontWall.transform.localScale = new Vector3(width, height, wallThickness);
-                  frontWall.layer = LayerMask.NameToLayer("Wall");
-                  frontWall.tag = "Wall"; // Установка тега Wall
+                  // Добавляем компонент для определения стены
+                  wall.AddComponent<WallIdentifier>();
 
-                  // Установим базовый материал для стен
-                  Renderer frontWallRenderer = frontWall.GetComponent<Renderer>();
-                  if (frontWallRenderer != null)
+                  // Настраиваем коллайдер
+                  var collider = wall.GetComponent<BoxCollider>();
+                  if (collider != null)
                   {
-                        SetDefaultWallMaterial(frontWallRenderer);
+                        collider.isTrigger = false;
                   }
 
-                  var backWall = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                  backWall.name = "Back Wall";
-                  backWall.transform.position = new Vector3(0, 0, -depth / 2);
-                  backWall.transform.localScale = new Vector3(width, height, wallThickness);
-                  backWall.layer = LayerMask.NameToLayer("Wall");
-                  backWall.tag = "Wall"; // Установка тега Wall
-
-                  // Установим базовый материал для стен
-                  Renderer backWallRenderer = backWall.GetComponent<Renderer>();
-                  if (backWallRenderer != null)
-                  {
-                        SetDefaultWallMaterial(backWallRenderer);
-                  }
-
-                  var leftWall = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                  leftWall.name = "Left Wall";
-                  leftWall.transform.position = new Vector3(-width / 2, 0, 0);
-                  leftWall.transform.localScale = new Vector3(wallThickness, height, depth);
-                  leftWall.layer = LayerMask.NameToLayer("Wall");
-                  leftWall.tag = "Wall"; // Установка тега Wall
-
-                  // Установим базовый материал для стен
-                  Renderer leftWallRenderer = leftWall.GetComponent<Renderer>();
-                  if (leftWallRenderer != null)
-                  {
-                        SetDefaultWallMaterial(leftWallRenderer);
-                  }
-
-                  var rightWall = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                  rightWall.name = "Right Wall";
-                  rightWall.transform.position = new Vector3(width / 2, 0, 0);
-                  rightWall.transform.localScale = new Vector3(wallThickness, height, depth);
-                  rightWall.layer = LayerMask.NameToLayer("Wall");
-                  rightWall.tag = "Wall"; // Установка тега Wall
-
-                  // Установим базовый материал для стен
-                  Renderer rightWallRenderer = rightWall.GetComponent<Renderer>();
-                  if (rightWallRenderer != null)
-                  {
-                        SetDefaultWallMaterial(rightWallRenderer);
-                  }
-
-                  // Создаем родительский объект для комнаты
-                  var roomParent = new GameObject("Test Room");
-                  floor.transform.SetParent(roomParent.transform);
-                  ceiling.transform.SetParent(roomParent.transform);
-                  frontWall.transform.SetParent(roomParent.transform);
-                  backWall.transform.SetParent(roomParent.transform);
-                  leftWall.transform.SetParent(roomParent.transform);
-                  rightWall.transform.SetParent(roomParent.transform);
-
-                  Debug.Log("Тестовая комната успешно создана. Все стены помечены тегом 'Wall'");
-
-                  // Убеждаемся, что в проекте существует тег Wall
-                  CreateWallTag();
+                  return wall;
             }
 
             private static void CreateWallTag()
@@ -303,71 +359,32 @@ namespace Remalux.WallPainting.Vision
                   }
             }
 
-            private static Button CreateButton(string name, Transform parent, Vector2 anchorPosition, string text)
-            {
-                  // Create button object
-                  var buttonObject = new GameObject(name);
-                  buttonObject.transform.SetParent(parent, false);
-
-                  // Add required components
-                  var button = buttonObject.AddComponent<Button>();
-                  var image = buttonObject.AddComponent<Image>();
-
-                  // Set button colors
-                  var colors = button.colors;
-                  colors.normalColor = new Color(1f, 1f, 1f, 0.8f);
-                  colors.highlightedColor = new Color(1f, 1f, 1f, 1f);
-                  colors.pressedColor = new Color(0.8f, 0.8f, 0.8f, 1f);
-                  button.colors = colors;
-
-                  // Create text object
-                  var textObject = new GameObject("Text");
-                  textObject.transform.SetParent(buttonObject.transform, false);
-                  var textComponent = textObject.AddComponent<Text>();
-                  textComponent.text = text;
-                  textComponent.alignment = TextAnchor.MiddleCenter;
-                  textComponent.color = Color.black;
-
-                  // Try to get the default font
-                  var fonts = Resources.FindObjectsOfTypeAll<Font>();
-                  if (fonts != null && fonts.Length > 0)
-                  {
-                        textComponent.font = fonts[0];
-                  }
-                  else
-                  {
-                        Debug.LogWarning("No fonts found in the project. Text might not be visible.");
-                  }
-
-                  textComponent.fontSize = 24;
-                  textComponent.resizeTextForBestFit = true;
-                  textComponent.resizeTextMinSize = 12;
-                  textComponent.resizeTextMaxSize = 32;
-
-                  // Set button rectangle transform
-                  var buttonRect = button.GetComponent<RectTransform>();
-                  buttonRect.anchorMin = buttonRect.anchorMax = anchorPosition;
-                  buttonRect.sizeDelta = new Vector2(160, 40);
-                  buttonRect.anchoredPosition = Vector2.zero;
-
-                  // Set text rectangle transform
-                  var textRect = textComponent.rectTransform;
-                  textRect.anchorMin = Vector2.zero;
-                  textRect.anchorMax = Vector2.one;
-                  textRect.sizeDelta = Vector2.zero;
-                  textRect.offsetMin = Vector2.zero;
-                  textRect.offsetMax = Vector2.zero;
-
-                  return button;
-            }
-
             // Метод для установки базового материала стены
             private static void SetDefaultWallMaterial(Renderer renderer)
             {
+                  // Create a simple material instead of relying on custom shader
                   Material wallMaterial = new Material(Shader.Find("Standard"));
-                  wallMaterial.color = new Color(0.95f, 0.95f, 0.9f); // Кремовый/бежевый цвет
-                  wallMaterial.SetFloat("_Glossiness", 0.1f); // Матовый
-                  renderer.material = wallMaterial;
+                  if (wallMaterial != null)
+                  {
+                        // Set basic material properties
+                        wallMaterial.color = Color.white;
+                        wallMaterial.SetFloat("_Glossiness", 0.1f);
+                        wallMaterial.SetFloat("_Metallic", 0.0f);
+
+                        // Apply material to renderer
+                        renderer.material = wallMaterial;
+
+                        // Set layer if available
+                        int wallLayer = LayerMask.NameToLayer("Wall");
+                        if (wallLayer != -1)
+                        {
+                              renderer.gameObject.layer = wallLayer;
+                        }
+                  }
+                  else
+                  {
+                        Debug.LogError("Failed to create wall material. Standard shader not found.");
+                  }
             }
 
             private static GameObject CreateBackgroundCanvas()
@@ -388,15 +405,15 @@ namespace Remalux.WallPainting.Vision
 
                   // Создаем градиентную текстуру для фона
                   Texture2D gradientTexture = CreateGradientTexture(
-                        new Color(0.1f, 0.2f, 0.4f), // Темно-синий внизу
-                        new Color(0.5f, 0.7f, 0.9f)  // Светло-голубой вверху
+                      new Color(0.1f, 0.2f, 0.4f), // Темно-синий внизу
+                      new Color(0.5f, 0.7f, 0.9f)  // Светло-голубой вверху
                   );
 
                   // Создаем спрайт из текстуры
                   Sprite bgSprite = Sprite.Create(
-                        gradientTexture,
-                        new UnityEngine.Rect(0, 0, gradientTexture.width, gradientTexture.height),
-                        new Vector2(0.5f, 0.5f)
+                      gradientTexture,
+                      new UnityEngine.Rect(0, 0, gradientTexture.width, gradientTexture.height),
+                      new Vector2(0.5f, 0.5f)
                   );
 
                   // Применяем спрайт к Image компоненту
