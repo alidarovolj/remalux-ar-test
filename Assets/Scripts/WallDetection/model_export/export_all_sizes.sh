@@ -1,27 +1,72 @@
 #!/bin/bash
-# Script to export DeepLabV3 MobileNet model at different sizes
+# Script to export DeepLabV3 MobileNet model at different sizes with optimization and testing
 
-# Create output directory if not exists
-mkdir -p models
+# Set environment
+export_dir="models"
+test_image="test_images/room_wall.jpg"
+
+# Create directories if they don't exist
+mkdir -p $export_dir
+mkdir -p test_images
+
+# Display help if needed
+if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
+  echo "Usage: ./export_all_sizes.sh [--no-optimize] [--test-image PATH]"
+  echo "  --no-optimize    : Skip model optimization"
+  echo "  --test-image PATH: Specify custom test image"
+  exit 0
+fi
+
+# Process arguments
+optimize="--optimize"
+if [[ "$*" == *"--no-optimize"* ]]; then
+  optimize=""
+  echo "Model optimization disabled"
+fi
+
+# Check if test image path is specified
+if [[ "$*" == *"--test-image"* ]]; then
+  for arg in "$@"; do
+    if [[ "$prev_arg" == "--test-image" ]]; then
+      test_image="$arg"
+      break
+    fi
+    prev_arg="$arg"
+  done
+fi
+
+# Check if test image exists
+if [ -f "$test_image" ]; then
+  test_img_arg="--test_image $test_image"
+  echo "Using test image: $test_image"
+else
+  test_img_arg=""
+  echo "No test image found at $test_image, testing will be skipped"
+  echo "Please add a test image to the test_images directory or specify with --test-image"
+fi
 
 echo "===== Exporting DeepLabV3 MobileNet models at different sizes ====="
+echo "Export directory: $export_dir"
+echo ""
 
 # Export small model (224x224)
-echo "\n\n===== Exporting 224x224 model ====="
-python export_mobilenet.py --input_size 224
+echo "===== Exporting 224x224 model ====="
+python export_mobilenet.py --input_size 224 --output_dir $export_dir $optimize $test_img_arg
 
 # Export medium model (320x320)
-echo "\n\n===== Exporting 320x320 model ====="
-python export_mobilenet.py --input_size 320
+echo "===== Exporting 320x320 model ====="
+python export_mobilenet.py --input_size 320 --output_dir $export_dir $optimize $test_img_arg
 
 # Export large model (512x512)
-echo "\n\n===== Exporting 512x512 model ====="
-python export_mobilenet.py --input_size 512
+echo "===== Exporting 512x512 model ====="
+python export_mobilenet.py --input_size 512 --output_dir $export_dir $optimize $test_img_arg
 
 # Export very large model (768x768)
-echo "\n\n===== Exporting 768x768 model ====="
-python export_mobilenet.py --input_size 768
+echo "===== Exporting 768x768 model ====="
+python export_mobilenet.py --input_size 768 --output_dir $export_dir $optimize $test_img_arg
 
-echo "\n\n===== Export completed ====="
-echo "Models are saved in the 'models' directory"
-echo "Please import them into your Unity project" 
+echo ""
+echo "===== Export completed ====="
+echo "Models are saved in the '$export_dir' directory"
+echo "Test results (if any) are saved in the '$export_dir/test_results' directory"
+echo "Please import the models into your Unity project at Assets/Resources/Models" 

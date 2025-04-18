@@ -1108,6 +1108,16 @@ public class DeepLabDecoder : MonoBehaviour
             Debug.LogError("Попытка загрузить пустую модель!");
             return false;
         }
+        
+        // Проверка совместимости модели перед загрузкой
+        string errorMessage;
+        bool isCompatible = BarracudaModelChecker.CheckModelCompatibilityStatic(newModel, out errorMessage);
+        
+        if (!isCompatible)
+        {
+            Debug.LogError($"Модель {newModel.name} несовместима с Barracuda: {errorMessage}");
+            return false;
+        }
 
         // Сохраняем ссылку на новую модель
         modelAsset = newModel;
