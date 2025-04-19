@@ -3,9 +3,14 @@ using System.Collections;
 using System.IO;
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
-
+// Import XROrigin from CoreUtils directly
+#if UNITY_2022_2_OR_NEWER
+using Unity.XR.CoreUtils;
+#endif
 #if UNITY_IOS
 using UnityEngine.XR.ARKit;
+using Unity.XR.CoreUtils.Bindings;
+using UnityEngine.XR.ARSubsystems;
 #endif
 
 /// <summary>
@@ -17,8 +22,12 @@ public class ARWorldMapController : MonoBehaviour
     [Tooltip("AR Session компонент")]
     public ARSession arSession;
     
-    [Tooltip("AR Session Origin компонент")]
-    public ARSessionOrigin arSessionOrigin;
+    [Tooltip("XR Origin компонент")]
+#if UNITY_2022_2_OR_NEWER
+    public XROrigin xrOrigin;
+#else
+    public Transform xrOrigin; // Fallback for older Unity versions
+#endif
 
     [Header("Настройки сохранения")]
     [Tooltip("Автоматически загружать карту при старте")]
@@ -43,12 +52,20 @@ public class ARWorldMapController : MonoBehaviour
     {
         if (arSession == null)
         {
-            arSession = FindObjectOfType<ARSession>();
+            arSession = FindFirstObjectByType<ARSession>();
         }
         
-        if (arSessionOrigin == null)
+        if (xrOrigin == null)
         {
-            arSessionOrigin = FindObjectOfType<ARSessionOrigin>();
+            var xrOriginObj = GameObject.Find("XR Origin");
+            if (xrOriginObj != null)
+            {
+#if UNITY_2022_2_OR_NEWER
+                xrOrigin = xrOriginObj.GetComponent<XROrigin>();
+#else
+                xrOrigin = xrOriginObj.transform;
+#endif
+            }
         }
 
         // Путь для сохранения ARWorldMap
@@ -178,7 +195,7 @@ public class ARWorldMapController : MonoBehaviour
     /// </summary>
     private IEnumerator SaveWorldMapRoutine()
     {
-        var sessionSubsystem = (ARKitSessionSubsystem)arSession.subsystem;
+        var sessionSubsystem = arSession.subsystem as ARKitSessionSubsystem;
         if (sessionSubsystem == null)
         {
             Debug.LogError("ARKit сессия недоступна");
@@ -232,7 +249,7 @@ public class ARWorldMapController : MonoBehaviour
             yield break;
         }
 
-        var sessionSubsystem = (ARKitSessionSubsystem)arSession.subsystem;
+        var sessionSubsystem = arSession.subsystem as ARKitSessionSubsystem;
         if (sessionSubsystem == null)
         {
             Debug.LogError("ARKit сессия недоступна");
@@ -251,7 +268,7 @@ public class ARWorldMapController : MonoBehaviour
             );
             
             // Десериализуем в ARWorldMap
-            var worldMap = ARWorldMap.Deserialize(worldMapNativeData);
+            var worldMap = UnityEngine.XR.ARKit.ARWorldMap.Deserialize(worldMapNativeData);
             worldMapNativeData.Dispose();
             
             if (!worldMap.valid)

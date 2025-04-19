@@ -3,6 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using System.IO;
+using Remalux.WallDetection;
+using Remalux.WallPainting;
 
 namespace Remalux.Settings
 {
@@ -194,12 +196,12 @@ namespace Remalux.Settings
         }
         
         // Apply settings to the specified DeepLabDecoder
-        public void ApplyToWallDetector(WallDetection.DeepLabDecoder detector)
+        public void ApplyToWallDetector(DeepLabDecoder detector)
         {
             if (detector == null)
                 return;
                 
-            detector.resolutionPreset = (WallDetection.DeepLabDecoder.InputResolution)CurrentSettings.resolutionPreset;
+            detector.resolutionPreset = (DeepLabDecoder.InputResolution)CurrentSettings.resolutionPreset;
             detector.autoAdjustLighting = CurrentSettings.autoAdjustLighting;
             detector.lowLightThreshold = CurrentSettings.lowLightThreshold;
             detector.lowLightBoost = CurrentSettings.lowLightBoost;
@@ -209,7 +211,7 @@ namespace Remalux.Settings
         }
         
         // Apply settings to the specified WallPainter
-        public void ApplyToWallPainter(Remalux.WallPainting.WallPainter painter)
+        public void ApplyToWallPainter(WallPainter painter)
         {
             if (painter == null)
                 return;

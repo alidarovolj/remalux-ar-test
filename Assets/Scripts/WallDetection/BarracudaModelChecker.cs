@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 using Unity.Barracuda;
 using UnityEngine.UI;
@@ -139,8 +140,8 @@ namespace WallDetection
                 result.isCompatible = true;
                 
                 // Сохранение информации о модели
-                result.inputNames = model.inputs.ToArray(x => x.name);
-                result.outputNames = model.outputs.ToArray();
+                result.inputNames = GetLayerNames(model);
+                result.outputNames = GetLayerNames(model).Where(name => model.outputs.Contains(name)).ToArray();
                 
                 // Получение размеров входа/выхода
                 if (model.inputs.Count > 0)
@@ -148,22 +149,22 @@ namespace WallDetection
                     var input = model.inputs[0];
                     if (input.shape.Length >= 3)
                     {
-                        result.inputHeight = input.shape[2];
-                        result.inputWidth = input.shape[3];
+                        result.inputHeight = GetTensorShapeHeight(input.shape);
+                        result.inputWidth = GetTensorShapeWidth(input.shape);
                     }
                 }
                 
                 // Определение размеров выхода сложнее, это приблизительная оценка
                 // для стандартных моделей сегментации
                 var outputLayers = model.layers.FindAll(l => model.outputs.Contains(l.name));
-                if (outputLayers.Count > 0 && outputLayers[0].datasets.Count > 0)
+                if (GetListCount(outputLayers) > 0 && GetDatasetCount(outputLayers[0].datasets) > 0)
                 {
                     var outputShape = outputLayers[0].datasets[0].shape;
                     if (outputShape.Length >= 3)
                     {
-                        result.outputHeight = outputShape[1];
-                        result.outputWidth = outputShape[2];
-                        result.outputChannels = outputShape[0];
+                        result.outputHeight = GetTensorShapeHeight(outputShape);
+                        result.outputWidth = GetTensorShapeWidth(outputShape);
+                        result.outputChannels = GetTensorShapeChannels(outputShape);
                     }
                 }
                 
@@ -177,7 +178,7 @@ namespace WallDetection
                 result.supportedBackends = supportedBackends.ToArray();
                 
                 // Размер модели (приблизительно)
-                result.modelSizeInBytes = nnModel != null ? nnModel.modelAsset.bytes.Length : new FileInfo(filePath).Length;
+                result.modelSizeInBytes = GetModelMemorySize(nnModel);
                 
                 // Попытка определить версию ONNX
                 result.onnxVersion = "Unknown";
@@ -188,6 +189,17 @@ namespace WallDetection
                         result.onnxVersion = layer.name;
                         break;
                     }
+                }
+                
+                // Проверяем модель, создавая воркер и выполняя базовую операцию
+                using (var worker = CreateWorkerForModel(model, WorkerFactory.Type.CSharpRef))
+                {
+                    if (worker == null)
+                    {
+                        throw new Exception("Не удалось создать воркер для модели");
+                    }
+                    
+                    // Модель успешно загружена и инициализирована
                 }
             }
             catch (Exception e)
@@ -385,7 +397,7 @@ namespace WallDetection
                     {
                         try
                         {
-                            using (var worker = WorkerFactory.CreateWorker(backendType, runtimeModel))
+                            using (var worker = CreateWorkerForModel(runtimeModel, backendType))
                             {
                                 // Если воркер создан успешно, модель совместима с этим бэкендом
                                 canCreateWorker = true;
@@ -412,6 +424,69 @@ namespace WallDetection
                 errorMessage = e.Message;
                 return false;
             }
+        }
+        
+        private string[] GetLayerNames(Model model)
+        {
+            if (model == null || model.layers == null)
+                return new string[0];
+                
+            return model.layers.Select(l => l.name).ToArray();
+        }
+        
+        private int GetDatasetCount(Layer.DataSet[] datasets)
+        {
+            return datasets != null ? datasets.Length : 0;
+        }
+        
+        private int GetTensorShapeHeight(TensorShape shape)
+        {
+            return shape.Length >= 3 ? shape[shape.Length - 2] : 0;
+        }
+        
+        private int GetTensorShapeWidth(TensorShape shape)
+        {
+            return shape.Length >= 3 ? shape[shape.Length - 1] : 0;
+        }
+        
+        private int GetTensorShapeChannels(TensorShape shape)
+        {
+            return shape.Length >= 4 ? shape[shape.Length - 3] : 0;
+        }
+        
+        private static IWorker CreateWorkerForModel(Model model, WorkerFactory.Type workerType)
+        {
+            if (model == null)
+                return null;
+                
+            try {
+                return WorkerFactory.CreateWorker(workerType, model);
+            }
+            catch (Exception e) {
+                Debug.LogError($"Error creating worker: {e.Message}");
+                return null;
+            }
+        }
+        
+        private long GetModelMemorySize(NNModel model)
+        {
+            if (model == null)
+                return 0;
+                
+            try {
+                // Attempt to get the size of the model assets
+                var modelAsset = model.Value;
+                return modelAsset != null ? modelAsset.Length : 0;
+            }
+            catch (Exception e) {
+                Debug.LogError($"Error getting model size: {e.Message}");
+                return 0;
+            }
+        }
+        
+        private int GetListCount<T>(List<T> list)
+        {
+            return list != null ? list.Count : 0;
         }
     }
 } 

@@ -1,0 +1,24 @@
+{
+    "name": "Remalux.WallDetectionTools",
+    "rootNamespace": "Remalux.WallDetectionTools",
+    "references": [
+        "GUID:f51ebe6a0ceec4240a699833d6309b23",
+        "GUID:5c2b5ba89f9e74e418232e154bc5cc7a",
+        "GUID:c3e13e626dfb9ed4cb362c069b69febb",
+        "GUID:9e24947de15b9834991c9d8411ea37cf",
+        "GUID:84651a3751eca9349aac36a66bba901b",
+        "GUID:15fc0a57446b3144c949da3e2b9737a9",
+        "GUID:ccdb0db644b3c0c47a7d3d4e44b62c7f"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+} 

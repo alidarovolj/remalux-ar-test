@@ -54,12 +54,13 @@ public class ModelSwitcher : MonoBehaviour
     private int[] resolutionOptions = new int[] { 224, 320, 512, 768 };
     private int currentModelIndex = 0;
     private float timeSinceLastStatsUpdate = 0;
+    private DeepLabDecoder _wallDetector;
 
     private void Start()
     {
         if (decoder == null)
         {
-            decoder = FindObjectOfType<DeepLabDecoder>();
+            decoder = GetWallDetector();
             if (decoder == null)
             {
                 Debug.LogError("DeepLabDecoder не найден! ModelSwitcher не будет работать.");
@@ -251,5 +252,17 @@ public class ModelSwitcher : MonoBehaviour
                                   $"FPS: {fps:F1}\n" +
                                   $"Устройство: {(decoder.useGPU ? "GPU" : "CPU")}";
         }
+    }
+
+    /// <summary>
+    /// Get wall detector component
+    /// </summary>
+    private DeepLabDecoder GetWallDetector()
+    {
+        if (_wallDetector == null)
+        {
+            _wallDetector = FindFirstObjectByType<DeepLabDecoder>();
+        }
+        return _wallDetector;
     }
 }

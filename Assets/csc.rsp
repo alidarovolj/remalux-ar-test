@@ -1,0 +1,4 @@
+-r:Unity.Barracuda.dll
+-r:Unity.XR.CoreUtils.dll
+-r:Unity.XR.ARSubsystems.dll
+-r:Unity.XR.ARFoundation.dll 

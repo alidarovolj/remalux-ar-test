@@ -1,0 +1,4 @@
+-r:Library/ScriptAssemblies/Unity.XR.ARSubsystems.dll
+-r:Library/ScriptAssemblies/Unity.Barracuda.dll
+-r:Library/ScriptAssemblies/Unity.XR.ARFoundation.dll
+-r:Library/ScriptAssemblies/Unity.XR.CoreUtils.dll 

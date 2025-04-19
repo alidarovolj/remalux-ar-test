@@ -1,0 +1,19 @@
+numpy>=1.20.0
+Pillow>=9.0.0
+matplotlib>=3.5.0
+tqdm>=4.62.0
+# ONNX components - installed with no-build-isolation to avoid SSE4.1 errors
+onnx>=1.14.0
+onnxruntime>=1.16.0
+onnx-simplifier>=0.4.31
+protobuf>=3.20.0,<4.0.0
+# PyTorch components will be installed separately with MPS support
+# pip install torch torchvision
+# Visualization tools
+netron>=7.1.7
+# ARM64-specific packages
+tabulate>=0.8.9
+# Libraries for optimization
+numpy-quaternion>=2022.4.2
+# Model conversion utilities
+onnxoptimizer>=0.3.10 

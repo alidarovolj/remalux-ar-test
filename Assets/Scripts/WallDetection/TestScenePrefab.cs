@@ -67,13 +67,16 @@ public class TestScenePrefab : MonoBehaviour
     {
         // Обновление текста статуса
         UpdateStatusText();
+        
+        // Update preview textures
+        UpdateUITextures();
     }
     
     private void CheckComponents()
     {
         if (arSession == null)
         {
-            arSession = FindObjectOfType<ARSession>();
+            arSession = FindFirstObjectByType<ARSession>();
             if (arSession == null)
             {
                 Debug.LogWarning("ARSession не найден! AR функции будут недоступны.");
@@ -82,7 +85,7 @@ public class TestScenePrefab : MonoBehaviour
         
         if (arCameraManager == null)
         {
-            arCameraManager = FindObjectOfType<ARCameraManager>();
+            arCameraManager = FindFirstObjectByType<ARCameraManager>();
             if (arCameraManager == null)
             {
                 Debug.LogWarning("ARCameraManager не найден! AR функции будут недоступны.");
@@ -91,7 +94,7 @@ public class TestScenePrefab : MonoBehaviour
         
         if (deeplabDecoder == null)
         {
-            deeplabDecoder = FindObjectOfType<DeepLabDecoder>();
+            deeplabDecoder = FindFirstObjectByType<DeepLabDecoder>();
             if (deeplabDecoder == null)
             {
                 Debug.LogError("DeepLabDecoder не найден! Тестирование невозможно.");
@@ -102,7 +105,7 @@ public class TestScenePrefab : MonoBehaviour
         
         if (modelSwitcher == null)
         {
-            modelSwitcher = FindObjectOfType<ModelSwitcher>();
+            modelSwitcher = FindFirstObjectByType<ModelSwitcher>();
             if (modelSwitcher == null)
             {
                 Debug.LogWarning("ModelSwitcher не найден! Функции переключения моделей недоступны.");
@@ -140,20 +143,6 @@ public class TestScenePrefab : MonoBehaviour
             }
         }
         
-        // Связываем предпросмотры с текстурами из DeepLabDecoder
-        if (deeplabDecoder != null)
-        {
-            if (cameraPreview != null)
-            {
-                cameraPreview.texture = deeplabDecoder.cameraTexture;
-            }
-            
-            if (maskPreview != null)
-            {
-                maskPreview.texture = deeplabDecoder.maskTexture;
-            }
-        }
-        
         // Находим statusText, если не задан
         if (statusText == null)
         {
@@ -168,6 +157,22 @@ public class TestScenePrefab : MonoBehaviour
         if (modelSwitcher != null)
         {
             modelSwitcher.decoder = deeplabDecoder;
+        }
+    }
+    
+    private void UpdateUITextures()
+    {
+        if (deeplabDecoder != null)
+        {
+            if (cameraPreview != null && deeplabDecoder.cameraTexture != null)
+            {
+                cameraPreview.texture = deeplabDecoder.cameraTexture;
+            }
+            
+            if (maskPreview != null && deeplabDecoder.maskTexture != null)
+            {
+                maskPreview.texture = deeplabDecoder.maskTexture;
+            }
         }
     }
     

@@ -1,0 +1,17 @@
+{
+  "name": "com.remalux.ar",
+  "version": "1.0.0",
+  "displayName": "Remalux AR System",
+  "description": "Wall detection and painting system for AR applications",
+  "unity": "2022.3",
+  "dependencies": {
+    "com.unity.barracuda": "3.0.0",
+    "com.unity.xr.arfoundation": "6.0.5",
+    "com.unity.ugui": "2.0.0",
+    "com.unity.inputsystem": "1.12.0"
+  },
+  "author": {
+    "name": "Remalux Development Team",
+    "url": "https://remalux.dev"
+  }
+} 

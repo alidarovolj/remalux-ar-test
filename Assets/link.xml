@@ -10,4 +10,10 @@
   <assembly fullname="System.Runtime" preserve="all" />
   <assembly fullname="System.Runtime.InteropServices" preserve="all" />
   <assembly fullname="netstandard" preserve="all" />
+  <assembly fullname="Unity.XR.ARSubsystems" preserve="all"/>
+  <assembly fullname="Unity.Barracuda" preserve="all"/>
+  <assembly fullname="Unity.XR.ARFoundation" preserve="all"/>
+  <assembly fullname="Unity.XR.CoreUtils" preserve="all"/>
+  <assembly fullname="Remalux.Core" preserve="all"/>
+  <assembly fullname="Remalux.WallDetection" preserve="all"/>
 </linker> 

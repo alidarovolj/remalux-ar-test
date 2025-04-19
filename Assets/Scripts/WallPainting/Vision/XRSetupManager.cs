@@ -1,18 +1,17 @@
+using System.Collections;
 using UnityEngine;
-using UnityEngine.XR;
-using System.Collections.Generic;
 using UnityEngine.XR.ARFoundation;
-using UnityEngine.XR.ARSubsystems;
+using Unity.XR.ARSubsystems;
 using Unity.XR.CoreUtils;  // This contains XROrigin
 using UnityEngine.XR.Interaction.Toolkit;
-using UnityEngine.UI;
+using UnityEngine.XR.Management;
 using Unity.XR.CoreUtils.Bindings.Variables;  // For TrackedPoseDriver
 using UnityEngine.InputSystem;  // For InputSystem types
 using UnityEngine.InputSystem.XR;
 
 namespace Remalux.WallPainting.Vision
 {
-      [RequireComponent(typeof(XROrigin))]
+      [RequireComponent(typeof(Unity.XR.CoreUtils.XROrigin))]
       public class XRSetupManager : MonoBehaviour
       {
             [Header("XR Components")]
@@ -20,7 +19,7 @@ namespace Remalux.WallPainting.Vision
             [SerializeField] private float cameraYOffset = 1.6f;
             [SerializeField] private GameObject cameraOffset;
 
-            private XROrigin xrOrigin;
+            private Unity.XR.CoreUtils.XROrigin xrOrigin;
 
             private void Awake()
             {
@@ -30,10 +29,10 @@ namespace Remalux.WallPainting.Vision
             private void SetupXROrigin()
             {
                   // Check if XROrigin already exists
-                  xrOrigin = GetComponent<XROrigin>();
+                  xrOrigin = GetComponent<Unity.XR.CoreUtils.XROrigin>();
                   if (xrOrigin == null)
                   {
-                        xrOrigin = gameObject.AddComponent<XROrigin>();
+                        xrOrigin = gameObject.AddComponent<Unity.XR.CoreUtils.XROrigin>();
                   }
 
                   // Find or create camera

@@ -6,7 +6,7 @@ using OpenCVForUnity.UnityUtils;
 using OpenCVForUnity.UtilsModule;
 using System.Collections.Generic;
 using UnityEngine.XR.ARFoundation;
-using UnityEngine.XR.ARSubsystems;
+using Unity.XR.ARSubsystems;
 using Unity.Mathematics;
 using System.Linq;
 using Remalux.WallPainting.Vision;

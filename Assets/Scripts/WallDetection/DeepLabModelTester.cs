@@ -4,7 +4,7 @@ using UnityEngine;
 using Unity.Barracuda;
 using UnityEngine.UI;
 using System.IO;
-using Remalux.Settings;
+using Remalux.WallDetection;
 
 /// <summary>
 /// Класс для тестирования и сравнения различных моделей DeepLabV3
@@ -73,12 +73,23 @@ public class DeepLabModelTester : MonoBehaviour
     private Texture2D inputTexture;
     private RenderTexture tempRT;
     private bool isTesting = false;
-    private SettingsManager settingsManager;
+    private ISettingsProvider settingsProvider;
     
     void Start()
     {
-        // Получаем ссылку на менеджер настроек
-        settingsManager = SettingsManager.Instance;
+        // Get settings provider
+        settingsProvider = TryGetSettingsProvider();
+        if (settingsProvider == null)
+        {
+            // Use default settings provider if needed
+            var defaultProvider = DefaultSettingsProvider.Instance;
+            if (defaultProvider == null)
+            {
+                var providerObject = new GameObject("DefaultSettingsProvider");
+                defaultProvider = providerObject.AddComponent<DefaultSettingsProvider>();
+            }
+            settingsProvider = defaultProvider;
+        }
         
         // Инициализация камеры если нужно
         if (useCamera)
@@ -162,7 +173,7 @@ public class DeepLabModelTester : MonoBehaviour
         }
 
         // Применяем настройки освещения если нужно
-        if (applyLightingAdjustments && settingsManager != null && useSettingsManagerLighting)
+        if (applyLightingAdjustments && settingsProvider != null && useSettingsManagerLighting)
         {
             sourceImage = AdjustForLightingConditions(sourceImage);
         }
@@ -184,43 +195,63 @@ public class DeepLabModelTester : MonoBehaviour
             
             yield return new WaitForSeconds(0.1f); // Даем время для обновления UI
             
-            // Тестируем модель
+            // Test variables that need to be set outside the try block
             float avgTime = 0;
             float minTime = float.MaxValue;
             float maxTime = 0;
-            
-            // Загружаем модель
             IWorker engine = null;
+            Model runtimeModel = null;
+            Texture2D scaledInput = null;
+            Texture2D resultTexture = null;
+            
             try
             {
-                Model runtimeModel = ModelLoader.Load(config.model);
+                runtimeModel = ModelLoader.Load(config.model);
                 WorkerFactory.Type workerType = useGPU ? WorkerFactory.Type.ComputePrecompiled : WorkerFactory.Type.CSharpBurst;
                 engine = WorkerFactory.CreateWorker(workerType, runtimeModel);
                 
                 // Создаем масштабированное изображение для входа модели
-                Texture2D scaledInput = ScaleTexture(sourceImage, config.inputSize.x, config.inputSize.y);
+                scaledInput = ScaleTexture(sourceImage, config.inputSize.x, config.inputSize.y);
                 
                 // Прогреваем модель
                 Tensor inputTensor = new Tensor(scaledInput, channels: 3);
                 engine.Execute(inputTensor);
                 inputTensor.Dispose();
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Ошибка при инициализации модели {config.name}: {e.Message}");
+                results += $"{config.name} | ОШИБКА: {e.Message}\n";
                 
-                yield return null; // Даем время для выполнения
+                if (engine != null)
+                    engine.Dispose();
+                if (scaledInput != null && scaledInput != sourceImage)
+                    Destroy(scaledInput);
+                    
+                continue;
+            }
+            
+            yield return null; // Даем время для выполнения
+            
+            // Выполняем несколько прогонов для получения среднего времени
+            for (int i = 0; i < testIterations; i++)
+            {
+                Tensor inputTensor = null;
+                Tensor outputTensor = null;
                 
-                // Выполняем несколько прогонов для получения среднего времени
-                for (int i = 0; i < testIterations; i++)
+                try
                 {
                     inputTensor = new Tensor(scaledInput, channels: 3);
                     
                     float startTime = Time.realtimeSinceStartup;
                     engine.Execute(inputTensor);
-                    Tensor outputTensor = engine.PeekOutput();
+                    outputTensor = engine.PeekOutput();
                     float elapsedMs = (Time.realtimeSinceStartup - startTime) * 1000f;
                     
                     // Если это последняя итерация, показываем результат
                     if (i == testIterations - 1 && outputImage != null)
                     {
-                        Texture2D resultTexture = VisualizeSegmentation(outputTensor, config.inputSize.x, config.inputSize.y);
+                        resultTexture = VisualizeSegmentation(outputTensor, config.inputSize.x, config.inputSize.y);
                         outputImage.texture = resultTexture;
 
                         // Сохраняем результаты в файл если нужно
@@ -230,53 +261,56 @@ public class DeepLabModelTester : MonoBehaviour
                         }
                     }
                     
-                    inputTensor.Dispose();
-                    outputTensor.Dispose();
-                    
                     avgTime += elapsedMs;
                     minTime = Mathf.Min(minTime, elapsedMs);
                     maxTime = Mathf.Max(maxTime, elapsedMs);
-                    
-                    yield return null; // Даем время между итерациями
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Ошибка при выполнении модели {config.name}: {e.Message}");
+                    if (inputTensor != null)
+                        inputTensor.Dispose();
+                    if (outputTensor != null)
+                        outputTensor.Dispose();
+                    break;
                 }
                 
-                // Освобождаем ресурсы
+                if (inputTensor != null)
+                    inputTensor.Dispose();
+                if (outputTensor != null)
+                    outputTensor.Dispose();
+                
+                yield return null; // Даем время между итерациями
+            }
+            
+            // Освобождаем ресурсы
+            if (engine != null)
                 engine.Dispose();
+            if (scaledInput != null && scaledInput != sourceImage)
                 Destroy(scaledInput);
-                
-                // Рассчитываем среднее время
-                avgTime /= testIterations;
-                float fps = 1000f / avgTime;
-                
-                // Добавляем результаты
-                string modelResults = $"{config.name} | {config.inputSize.x}x{config.inputSize.y} | {avgTime:F2} мс | {fps:F1} FPS\n";
-                modelResults += $"  Min: {minTime:F2} мс, Max: {maxTime:F2} мс\n";
-                results += modelResults;
-                
-                // Выводим в лог если нужно
-                if (logResults)
-                {
-                    Debug.Log(modelResults);
-                }
-                
-                // Обновляем текст с результатами
-                if (resultsText != null)
-                {
-                    resultsText.text = results;
-                }
-                
-                yield return new WaitForSeconds(0.5f); // Пауза между тестами моделей
-            }
-            catch (System.Exception e)
+            
+            // Рассчитываем среднее время
+            avgTime /= testIterations;
+            float fps = 1000f / avgTime;
+            
+            // Добавляем результаты
+            string modelResults = $"{config.name} | {config.inputSize.x}x{config.inputSize.y} | {avgTime:F2} мс | {fps:F1} FPS\n";
+            modelResults += $"  Min: {minTime:F2} мс, Max: {maxTime:F2} мс\n";
+            results += modelResults;
+            
+            // Выводим в лог если нужно
+            if (logResults)
             {
-                Debug.LogError($"Ошибка при тестировании модели {config.name}: {e.Message}");
-                results += $"{config.name} | ОШИБКА: {e.Message}\n";
-                
-                if (engine != null)
-                {
-                    engine.Dispose();
-                }
+                Debug.Log(modelResults);
             }
+            
+            // Обновляем текст с результатами
+            if (resultsText != null)
+            {
+                resultsText.text = results;
+            }
+            
+            yield return new WaitForSeconds(0.5f); // Пауза между тестами моделей
         }
         
         // Выводим итоговые результаты
@@ -423,7 +457,7 @@ public class DeepLabModelTester : MonoBehaviour
     /// </summary>
     private Texture2D AdjustForLightingConditions(Texture2D texture)
     {
-        if (settingsManager == null || !settingsManager.AutoAdjustLighting)
+        if (settingsProvider == null || !settingsProvider.AutoAdjustLighting)
             return texture;
 
         Texture2D adjustedTexture = new Texture2D(texture.width, texture.height, texture.format, false);
@@ -431,9 +465,9 @@ public class DeepLabModelTester : MonoBehaviour
         Color[] adjustedPixels = new Color[pixels.Length];
 
         // Получаем настройки из SettingsManager
-        float lowLightBoost = settingsManager.LowLightBoost;
-        float lowLightThreshold = settingsManager.LowLightThreshold;
-        float contrastEnhancement = settingsManager.ContrastEnhancement;
+        float lowLightBoost = settingsProvider.LowLightBoost;
+        float lowLightThreshold = settingsProvider.LowLightThreshold;
+        float contrastEnhancement = settingsProvider.ContrastEnhancement;
 
         // Анализируем среднюю яркость изображения
         float totalBrightness = 0;
@@ -533,5 +567,40 @@ public class DeepLabModelTester : MonoBehaviour
         {
             RenderTexture.ReleaseTemporary(tempRT);
         }
+    }
+
+    /// <summary>
+    /// Tries to get SettingsManager through reflection
+    /// </summary>
+    private ISettingsProvider TryGetSettingsProvider()
+    {
+        try
+        {
+            // Get SettingsManager type via reflection
+            var settingsType = System.Type.GetType("Remalux.Settings.SettingsManager, Remalux.Settings");
+            if (settingsType != null)
+            {
+                // Get Instance property
+                var instanceProperty = settingsType.GetProperty("Instance");
+                if (instanceProperty != null)
+                {
+                    // Get singleton instance
+                    var instance = instanceProperty.GetValue(null);
+                    if (instance != null)
+                    {
+                        // Create adapter for ISettingsProvider
+                        var adapter = new GameObject("SettingsProviderAdapter").AddComponent<SettingsProviderAdapter>();
+                        adapter.SetSettingsManager(instance);
+                        return adapter;
+                    }
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"Failed to get SettingsManager: {e.Message}");
+        }
+        
+        return null;
     }
 } 

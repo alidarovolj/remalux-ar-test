@@ -157,6 +157,11 @@ namespace WallDetection
                 cpuBar.maxValue = 100;
                 cpuBar.value = 0;
             }
+
+            if (fpsText == null && showFPS)
+            {
+                fpsText = FindFirstObjectByType<TMPro.TextMeshProUGUI>();
+            }
         }
         
         private void InitializeLogging()
@@ -239,7 +244,7 @@ namespace WallDetection
                 timestamp = Time.time,
                 fps = 1.0f / deltaTime,
                 totalMemoryMB = (float)GC.GetTotalMemory(false) / (1024 * 1024),
-                allocatedMemoryMB = Profiler.GetTotalAllocatedMemoryLong() / (1024 * 1024),
+                allocatedMemoryMB = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / (1024 * 1024),
                 cpuUsage = Mathf.Clamp01(deltaTime / (1.0f / 60.0f)) * 100f, // Simple CPU usage approximation
                 processingTimeMs = deepLabDecoder != null ? deepLabDecoder.lastProcessingTime * 1000f : 0,
                 modelName = modelName,

@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEditor;
-using Unity.XR.CoreUtils;
+// Use reflection instead of direct reference
+// using Unity.XR.CoreUtils;
 using UnityEngine.UI;
 using UnityEngine.XR.ARFoundation;
 

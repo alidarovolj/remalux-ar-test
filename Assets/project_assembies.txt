@@ -1,0 +1,25 @@
+# Project Assembly References
+
+## Core Packages
+- Unity.XR.CoreUtils - GUID:dc960734dc080426fa6612f1c5fe95f3
+- Unity.Barracuda - GUID:5c2b5ba89f9e74e418232e154bc5cc7a
+- Unity.XR.ARSubsystems - GUID:92703082f92b41ba80f0d6912de66115
+- Unity.XR.ARFoundation - GUID:f9fe0089ec81f4079af78eb2287a6163
+- Unity.InputSystem - GUID:75469ad4d38634e559750d17036d5f7c
+- Unity.TextMeshPro - GUID:6055be8ebefd69e48b49212b09b47b2f
+
+## Project Assemblies
+- Remalux.Core - general project code
+- Remalux.AR - AR functionality
+- Remalux.WallDetection - Wall detection algorithms
+- Remalux.Editor - Editor utilities
+- Remalux.BarracudaTools - ONNX conversion tools
+- Remalux.Setup - Scene setup tools
+
+## Troubleshooting
+If you encounter missing assembly references, follow these steps:
+1. Open Unity and go to Tools > Reload Packages
+2. After Unity recompiles, use Tools > Fix Missing Assembly References
+3. If issues persist, use Tools > Recompile All Assemblies
+
+For manual fixes, ensure all assembly definition files include the appropriate references from the list above. 

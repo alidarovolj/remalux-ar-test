@@ -1,0 +1,15 @@
+{
+  "guid-map": [
+    { "guid": "6055be8ebefd69e48b49212b09b47b2f", "package": "Unity.TextMeshPro (via Unity.UGUI)" },
+    { "guid": "75469ad4d38634e559750d17036d5f7c", "package": "Unity.InputSystem" },
+    { "guid": "5c2b5ba89f9e74e418232e154bc5cc7a", "package": "Unity.Barracuda" },
+    { "guid": "a9420e37d7990b54abdef6688edbe313", "package": "Unity.Barracuda.Editor" },
+    { "guid": "f9fe0089ec81f4079af78eb2287a6163", "package": "Unity.XR.ARFoundation" },
+    { "guid": "30c8cca262b5718458d1fd2f13cbb489", "package": "Unity.XR.Management" },
+    { "guid": "0cd24b1a096aa4a25baa0f0481875b32", "package": "Unity.Mathematics" },
+    { "guid": "92703082f92b41ba80f0d6912de66115", "package": "Unity.XR.ARCore" },
+    { "guid": "e40ba710768534012815d3193fa296cb", "package": "Unity.XR.ARKit" },
+    { "guid": "4847341ff46394e83bb78fbd0652937e", "package": "Unity.XR.ARSubsystems" },
+    { "guid": "2bafac87e7f4b9b418d9448d219b01ab", "package": "Unity.UGUI" }
+  ]
+} 

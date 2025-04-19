@@ -4,7 +4,10 @@ using System.Collections.Generic;
 using UnityEngine.XR.ARFoundation;
 using System.Linq;
 using System.Collections;
-using Remalux.Settings;
+using Remalux.WallDetection;
+using UnityEngine.XR.ARSubsystems;
+using UnityEngine.XR.ARCore;
+using UnityEngine.XR.ARKit;
 
 /// <summary>
 /// Декодер для обработки результатов сегментации DeepLabV3
@@ -114,44 +117,114 @@ public class DeepLabDecoder : MonoBehaviour
     public float lastProcessingTime;
     private bool isProcessingFrame = false;
     
-    // Менеджер настроек
-    private SettingsManager settingsManager;
+    // Меняем ссылку на менеджер настроек
+    private ISettingsProvider settingsProvider;
+
+    // Add these public properties for TestSceneGenerator and WallDetectionTester
+    public Texture2D cameraTexture { get; private set; }
+    public Texture2D maskTexture { get; private set; }
+    public NNModel model { 
+        get { return modelAsset; }
+        set { 
+            if (modelAsset != value) {
+                modelAsset = value;
+                if (modelReady) {
+                    // Reload model if already initialized
+                    CleanupModel();
+                    InitializeModel();
+                }
+            }
+        }
+    }
+    public bool applyPostProcessing = true;
 
     void Start()
     {
-        // Получаем ссылку на менеджер настроек
-        settingsManager = SettingsManager.Instance;
-        if (settingsManager != null)
+        // Сначала пробуем получить SettingsManager через reflection чтобы избежать прямой зависимости
+        settingsProvider = TryGetSettingsManager();
+        
+        // Если не получилось, используем DefaultSettingsProvider
+        if (settingsProvider == null)
         {
-            // Подписываемся на событие изменения настроек
-            settingsManager.OnSettingsChanged += OnSettingsChanged;
+            // Проверяем, существует ли уже DefaultSettingsProvider
+            var defaultProvider = DefaultSettingsProvider.Instance;
+            if (defaultProvider == null)
+            {
+                // Создаем новый GameObject с DefaultSettingsProvider
+                var providerObject = new GameObject("DefaultSettingsProvider");
+                defaultProvider = providerObject.AddComponent<DefaultSettingsProvider>();
+            }
+            
+            settingsProvider = defaultProvider;
+            Debug.Log("DeepLabDecoder: Using DefaultSettingsProvider");
+        }
+        
+        // Подписываемся на событие изменения настроек
+        if (settingsProvider != null)
+        {
+            settingsProvider.OnSettingsChanged += OnSettingsChanged;
         }
         
         // Устанавливаем размер входного изображения в зависимости от выбранного пресета
-        ApplySettingsFromManager();
+        ApplySettingsFromProvider();
         InitializeModel();
     }
     
     /// <summary>
-    /// Применяет настройки из менеджера настроек
+    /// Пытается получить SettingsManager через reflection для избежания прямой зависимости
     /// </summary>
-    private void ApplySettingsFromManager()
+    private ISettingsProvider TryGetSettingsManager()
     {
-        if (settingsManager == null)
+        try
+        {
+            // Получаем тип SettingsManager через reflection
+            var settingsType = System.Type.GetType("Remalux.Settings.SettingsManager, Remalux.Settings");
+            if (settingsType != null)
+            {
+                // Получаем свойство Instance
+                var instanceProperty = settingsType.GetProperty("Instance");
+                if (instanceProperty != null)
+                {
+                    // Получаем значение свойства (синглтон)
+                    var instance = instanceProperty.GetValue(null);
+                    if (instance != null)
+                    {
+                        // Создаем адаптер для ISettingsProvider
+                        var adapter = new GameObject("SettingsProviderAdapter").AddComponent<SettingsProviderAdapter>();
+                        adapter.SetSettingsManager(instance);
+                        return adapter;
+                    }
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"Failed to get SettingsManager: {e.Message}");
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Применяет настройки из провайдера настроек
+    /// </summary>
+    private void ApplySettingsFromProvider()
+    {
+        if (settingsProvider == null)
             return;
             
         // Устанавливаем размер входа на основе настроек
-        Vector2Int resolution = settingsManager.GetCurrentResolution();
+        Vector2Int resolution = settingsProvider.GetCurrentResolution();
         inputWidth = resolution.x;
         inputHeight = resolution.y;
         
         // Применяем другие настройки
-        processingInterval = settingsManager.ProcessingInterval;
-        showPerformanceMetrics = settingsManager.ShowPerformanceMetrics;
-        autoAdjustLighting = settingsManager.AutoAdjustLighting;
-        lowLightBoost = settingsManager.LowLightBoost;
-        lowLightThreshold = settingsManager.LowLightThreshold;
-        contrastEnhancement = settingsManager.ContrastEnhancement;
+        processingInterval = settingsProvider.ProcessingInterval;
+        showPerformanceMetrics = settingsProvider.ShowPerformanceMetrics;
+        autoAdjustLighting = settingsProvider.AutoAdjustLighting;
+        lowLightBoost = settingsProvider.LowLightBoost;
+        lowLightThreshold = settingsProvider.LowLightThreshold;
+        contrastEnhancement = settingsProvider.ContrastEnhancement;
         
         // Пересоздаем текстуры если нужно
         if (inputTexture != null && (inputTexture.width != inputWidth || inputTexture.height != inputHeight))
@@ -167,7 +240,7 @@ public class DeepLabDecoder : MonoBehaviour
             wallMaskData = new float[inputHeight, inputWidth];
         }
         
-        Debug.Log($"DeepLabV3: Применены настройки из менеджера, разрешение {inputWidth}x{inputHeight}");
+        Debug.Log($"DeepLabV3: Применены настройки из провайдера, разрешение {inputWidth}x{inputHeight}");
     }
     
     /// <summary>
@@ -175,7 +248,7 @@ public class DeepLabDecoder : MonoBehaviour
     /// </summary>
     private void OnSettingsChanged()
     {
-        ApplySettingsFromManager();
+        ApplySettingsFromProvider();
     }
     
     /// <summary>
@@ -199,9 +272,9 @@ public class DeepLabDecoder : MonoBehaviour
                 break;
             case InputResolution.Custom:
                 // Если доступен менеджер настроек, используем разрешение из него
-                if (settingsManager != null)
+                if (settingsProvider != null)
                 {
-                    Vector2Int customRes = settingsManager.CustomResolution;
+                    Vector2Int customRes = settingsProvider.CustomResolution;
                     inputWidth = customRes.x;
                     inputHeight = customRes.y;
                 }
@@ -240,9 +313,9 @@ public class DeepLabDecoder : MonoBehaviour
         CleanupModel();
         
         // Отписываемся от события изменения настроек
-        if (settingsManager != null)
+        if (settingsProvider != null)
         {
-            settingsManager.OnSettingsChanged -= OnSettingsChanged;
+            settingsProvider.OnSettingsChanged -= OnSettingsChanged;
         }
     }
 
@@ -427,50 +500,46 @@ public class DeepLabDecoder : MonoBehaviour
     /// </summary>
     private Texture2D GetCameraTexture()
     {
-        if (cameraManager != null)
+        if (cameraManager != null && cameraManager.TryAcquireLatestCpuImage(out Unity.XR.ARSubsystems.XRCpuImage image))
         {
-            // Получаем текстуру из AR камеры
-            Texture2D arCameraTexture = null;
-            
             try
             {
-                XRCpuImage image;
-                if (cameraManager.TryAcquireLatestCpuImage(out image))
+                // Convert the image to an RGBA format
+                Unity.XR.ARSubsystems.XRCpuImage.ConversionParams conversionParams = new Unity.XR.ARSubsystems.XRCpuImage.ConversionParams
                 {
-                    using (image)
-                    {
-                        var conversionParams = new XRCpuImage.ConversionParams
-                        {
-                            inputRect = new RectInt(0, 0, image.width, image.height),
-                            outputDimensions = new Vector2Int(inputWidth, inputHeight),
-                            outputFormat = TextureFormat.RGB24,
-                            transformation = XRCpuImage.Transformation.MirrorY
-                        };
+                    inputRect = new RectInt(0, 0, image.width, image.height),
+                    outputDimensions = new Vector2Int(inputWidth, inputHeight),
+                    outputFormat = TextureFormat.RGBA32,
+                    transformation = Unity.XR.ARSubsystems.XRCpuImage.Transformation.MirrorY
+                };
 
-                        // Получаем размер буфера для преобразованного изображения
-                        int size = image.GetConvertedDataSize(conversionParams);
-                        var buffer = new byte[size];
-                        
-                        // Преобразуем изображение
-                        image.Convert(conversionParams, buffer, buffer.Length);
-                        
-                        // Загружаем в текстуру
-                        if (inputTexture == null || inputTexture.width != inputWidth || inputTexture.height != inputHeight)
-                        {
-                            inputTexture = new Texture2D(inputWidth, inputHeight, TextureFormat.RGB24, false);
-                        }
-                        
-                        inputTexture.LoadRawTextureData(buffer);
-                        inputTexture.Apply();
-                        
-                        return inputTexture;
-                    }
+                // Create texture if needed
+                if (inputTexture == null || inputTexture.width != inputWidth || inputTexture.height != inputHeight)
+                {
+                    if (inputTexture != null)
+                        Destroy(inputTexture);
+                    inputTexture = new Texture2D(inputWidth, inputHeight, TextureFormat.RGBA32, false);
                 }
+
+                // Get raw bytes from the image
+                int size = image.GetConvertedDataSize(conversionParams);
+                byte[] data = new byte[size];
+                image.Convert(conversionParams, data, data.Length);
+
+                // Apply to texture
+                inputTexture.LoadRawTextureData(data);
+                inputTexture.Apply();
+
+                // Update the public camera texture property
+                cameraTexture = inputTexture;
             }
-            catch (System.Exception e)
+            finally
             {
-                Debug.LogError($"Ошибка получения изображения с AR камеры: {e.Message}");
+                // Always dispose the image
+                image.Dispose();
             }
+
+            return inputTexture;
         }
         
         // Если AR камера недоступна, используем альтернативный источник
@@ -606,6 +675,9 @@ public class DeepLabDecoder : MonoBehaviour
         PostProcessWallMask();
 
         wallMask.Apply();
+
+        // At the end of the method, update the public maskTexture property
+        maskTexture = wallMask;
     }
 
     /// <summary>
@@ -1109,13 +1181,26 @@ public class DeepLabDecoder : MonoBehaviour
             return false;
         }
         
-        // Проверка совместимости модели перед загрузкой
-        string errorMessage;
-        bool isCompatible = BarracudaModelChecker.CheckModelCompatibilityStatic(newModel, out errorMessage);
-        
-        if (!isCompatible)
+        // Replace any references to BarracudaModelChecker with a simple compatibility check
+        bool IsModelCompatible(NNModel model)
         {
-            Debug.LogError($"Модель {newModel.name} несовместима с Barracuda: {errorMessage}");
+            try
+            {
+                // Simple load test to check compatibility
+                var runtimeModel = ModelLoader.Load(model);
+                return runtimeModel != null;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Model compatibility check failed: {e.Message}");
+                return false;
+            }
+        }
+        
+        // Use the local function instead of BarracudaModelChecker
+        if (!IsModelCompatible(newModel))
+        {
+            Debug.LogError($"Model {newModel.name} is not compatible with Barracuda.");
             return false;
         }
 
@@ -1178,5 +1263,28 @@ public class DeepLabDecoder : MonoBehaviour
         customResolution = new Vector2Int(width, height);
         resolutionPreset = InputResolution.Custom;
         SetInputResolution(resolutionPreset);
+    }
+
+    // Add ProcessImage method for TestSceneGenerator
+    public void ProcessImage(Texture2D sourceImage)
+    {
+        if (!modelReady || sourceImage == null)
+            return;
+            
+        // Scale the image to input size if needed
+        Texture2D scaledImage = sourceImage;
+        if (sourceImage.width != inputWidth || sourceImage.height != inputHeight)
+        {
+            scaledImage = ScaleTexture(sourceImage, inputWidth, inputHeight);
+        }
+        
+        // Process the image
+        ProcessFrame(scaledImage);
+        
+        // Clean up if we created a new texture
+        if (scaledImage != sourceImage)
+        {
+            Destroy(scaledImage);
+        }
     }
 } 

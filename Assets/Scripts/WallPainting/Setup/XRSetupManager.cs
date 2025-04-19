@@ -1,18 +1,20 @@
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
-using UnityEngine.XR.ARSubsystems;
+using Unity.XR.ARSubsystems;
 using Unity.XR.CoreUtils;  // This contains XROrigin
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.UI;
 using Unity.XR.CoreUtils.Bindings.Variables;  // For TrackedPoseDriver
 using UnityEngine.InputSystem;  // For InputSystem types
+using UnityEngine.Rendering.Universal;
+using System.Collections;
 
 namespace Remalux.WallPainting.Setup
 {
       public class XRSetupManager : MonoBehaviour
       {
             [Header("XR Components")]
-            public XROrigin xrOrigin;
+            public Unity.XR.CoreUtils.XROrigin xrOrigin;
             public Camera mainCamera;
             public ARSession arSession;
             public Canvas arCanvas;
@@ -24,14 +26,14 @@ namespace Remalux.WallPainting.Setup
 
             private void SetupXRComponents()
             {
-                  // Create or get XR Origin
+                  // Check if xrOrigin exists
                   if (xrOrigin == null)
                   {
-                        xrOrigin = FindAnyObjectByType<XROrigin>();
+                        xrOrigin = FindAnyObjectByType<Unity.XR.CoreUtils.XROrigin>();
                         if (xrOrigin == null)
                         {
                               GameObject xrOriginObj = new GameObject("XR Origin");
-                              xrOrigin = xrOriginObj.AddComponent<XROrigin>();
+                              xrOrigin = xrOriginObj.AddComponent<Unity.XR.CoreUtils.XROrigin>();
                         }
                   }
 

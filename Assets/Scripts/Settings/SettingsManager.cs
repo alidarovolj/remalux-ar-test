@@ -62,7 +62,7 @@ namespace Remalux.Settings
         [SerializeField] private List<Color> _recentColors = new List<Color>();
         [SerializeField] private int _maxRecentColors = 10;
 
-        [Header("События")]
+        // События
         public event Action OnSettingsChanged;
 
         private void Awake()

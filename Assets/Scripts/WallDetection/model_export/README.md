@@ -12,6 +12,7 @@ onnx
 numpy
 matplotlib
 pillow
+tabulate
 ```
 
 You can install them using pip:
@@ -19,7 +20,9 @@ You can install them using pip:
 pip install -r requirements.txt
 ```
 
-## export_mobilenet.py
+## Standard Tools
+
+### export_mobilenet.py
 
 This script exports DeepLabV3 models with various backbones (MobileNetV3-Large or ResNet50) to ONNX format, with options for optimization and validation.
 
@@ -54,23 +57,158 @@ python export_mobilenet.py --model_type resnet50 --test_image test_images/room_w
 python export_mobilenet.py --output_dir "/path/to/models" --optimize
 ```
 
-## Batch Export Scripts
+## Apple Silicon (ARM64) Tools
 
-Two scripts are provided to export models at different sizes:
+### Apple Silicon Compatibility
 
-### export_all_sizes.sh (Linux/macOS)
+When working with Apple Silicon (M1/M2/M3) Macs, you may encounter compatibility issues with ONNX compilation due to x86-specific optimizations that are not compatible with ARM architecture. We've created specialized tools for exporting and converting models on ARM64 devices.
+
+### ARM64-Specific Scripts
+
+#### export_arm64.py
+Exports DeepLabV3 models optimized for ARM64 architecture:
 
 ```
+python export_arm64.py --model_type MODEL_TYPE --size SIZE --output_dir OUTPUT_DIR [--quantize] [--test]
+```
+
+Parameters:
+- `--model_type`: Model backbone ('mobilenet' or 'resnet50')
+- `--size`: Input resolution (e.g., 224, 256, 320, 384)
+- `--output_dir`: Directory for saving models (default: "./exported_models_arm64")
+- `--quantize`: Apply quantization to reduce model size
+- `--test`: Test the model after export
+
+#### convert_arm64.py
+Converts existing ONNX models for ARM64 compatibility:
+
+```
+python convert_arm64.py --input_dir INPUT_DIR --output_dir OUTPUT_DIR [--quantize] [--test]
+```
+
+Parameters:
+- `--input_dir`: Directory containing input ONNX models
+- `--output_dir`: Directory to save converted models
+- `--quantize`: Apply quantization to the model
+- `--test`: Test the converted model
+
+#### setup_arm64.sh
+Sets up the Python environment for model export on Apple Silicon:
+
+```
+./setup_arm64.sh
+```
+
+This script:
+- Checks if running on ARM64 architecture
+- Creates a Python virtual environment
+- Installs PyTorch with MPS support
+- Installs all dependencies from requirements_arm64.txt
+- Verifies ONNX installation
+
+#### export_arm64.sh
+Batch exports models at different resolutions for ARM64:
+
+```
+./export_arm64.sh
+```
+
+### ARM64 Requirements
+
+For Apple Silicon Macs, use the ARM64-specific requirements:
+
+```
+pip install -r requirements_arm64.txt
+```
+
+Key differences in ARM64 requirements:
+- PyTorch is installed separately with MPS support
+- ONNX components are installed with `--no-build-isolation` to avoid SSE4.1 compilation errors
+- Additional dependencies for ARM64 optimization
+
+## analyze_models.py
+
+This script analyzes exported ONNX models and generates comprehensive comparison reports including file size, parameter count, operations, and visualizations.
+
+### Usage
+
+```
+python analyze_models.py [--models_dir MODELS_DIR] [--output_dir OUTPUT_DIR] [--csv]
+```
+
+### Parameters
+
+- `--models_dir`: Directory containing models to analyze (default: "models")
+- `--output_dir`: Directory to save analysis reports (default: "model_analysis")
+- `--csv`: Flag to export model data to CSV file (optional)
+
+### Examples
+
+```
+# Analyze models with default settings
+python analyze_models.py
+
+# Analyze models in a specific directory and output CSV
+python analyze_models.py --models_dir "/path/to/models" --csv
+
+# Specify custom output directory for reports
+python analyze_models.py --output_dir "my_reports"
+```
+
+## Batch Scripts
+
+Two sets of scripts are provided for convenience:
+
+### Export Scripts
+
+Export models with different configurations:
+
+```
+# Linux/macOS
 ./export_all_sizes.sh [--no-optimize] [--test-image PATH]
-```
 
-### export_all_sizes.bat (Windows)
-
-```
+# Windows
 export_all_sizes.bat [--no-optimize] [--test-image PATH]
+
+# Apple Silicon (ARM64)
+./export_arm64.sh
 ```
 
-These scripts export models with input sizes of 224x224, 320x320, 512x512, and 768x768.
+### Analysis Scripts
+
+Analyze exported models and generate reports:
+
+```
+# Linux/macOS
+./analyze_models.sh [--models_dir=DIR] [--output_dir=DIR] [--csv]
+
+# Windows
+analyze_models.bat [--models_dir=DIR] [--output_dir=DIR] [--csv]
+```
+
+## Test Scripts
+
+Test the export functionality with sample images:
+
+```
+# Linux/macOS
+./run_test.sh
+
+# Windows
+run_test.bat
+```
+
+## Environment Check Scripts
+
+Verify your environment is properly configured:
+
+```
+# Linux/macOS
+./check_env.sh
+
+# Windows
+check_env.bat
+```
 
 ## Model Optimization
 
@@ -91,6 +229,17 @@ You can validate models by providing a test image with the `--test_image` parame
 4. Save these visualizations in the `test_results` directory
 
 This allows you to compare the quality and performance of different model configurations before importing them into Unity.
+
+## Model Analysis
+
+The analyzer generates detailed reports, including:
+
+1. Interactive HTML report with model comparisons
+2. Size and parameter charts
+3. Operation type analysis
+4. Performance recommendations
+
+View the reports in any web browser after running the analyzer.
 
 ## Using the Exported Models in Unity
 
@@ -118,6 +267,16 @@ If you encounter errors during export:
 4. If using CUDA, ensure your GPU drivers are up to date
 5. For visualization issues, ensure matplotlib and pillow are correctly installed
 
+### ARM64-Specific Issues
+
+When building on Apple Silicon (M1/M2/M3) Macs:
+
+1. **SSE4.1 Error**: If you see `unsupported option '-msse4.1' for target 'arm64-apple-darwin'`, use the ARM64-specific tools
+2. **ONNX Build Failures**: Install ONNX with `pip install --no-build-isolation onnx`
+3. **PyTorch MPS Issues**: Ensure PyTorch is installed with MPS support using `pip install torch torchvision`
+4. **Slow Model Inference**: Enable MPS acceleration in your code with `device = torch.device("mps")`
+5. **Compatibility Problems**: Consider using `convert_arm64.py` to adapt models built on x86 machines
+
 ## Comparing Model Performance
 
 Use the DeepLabModelTester in Unity to compare:
@@ -125,4 +284,14 @@ Use the DeepLabModelTester in Unity to compare:
 - Processing speed (FPS)
 - Memory usage
 - Segmentation quality
-- Device compatibility 
+- Device compatibility
+
+## Workflow
+
+A typical workflow for finding the optimal model would be:
+
+1. Run `./export_all_sizes.sh` (or `./export_arm64.sh` on Apple Silicon) to generate models at different resolutions
+2. Run `./analyze_models.sh` to generate comparison reports
+3. Import promising models into Unity
+4. Test on target devices with DeepLabModelTester
+5. Select the best model based on quality and performance 
